@@ -2,7 +2,7 @@ const { verifyTuloToken } = require("../config/tulo");
 const User = require("../models/user.model");
 const UserLogin = require("../models/userLogin.model");
 const Otp = require("../models/otp.model");
-const twilioService = require("./twilio.service");
+const fast2smsService = require("./fast2sms.service");
 const { generateToken } = require("../utils/jwt");
 
 /**
@@ -64,7 +64,7 @@ const login = async (tuloToken) => {
 };
 
 /**
- * Send OTP via Twilio
+ * Send OTP via Fast2SMS
  * @param {string} phone - User phone number
  */
 const sendOtp = async (phone) => {
@@ -74,18 +74,18 @@ const sendOtp = async (phone) => {
         throw error;
     }
 
-    // Generate custom 6 digit OTP for fallback / custom SMS mode
+    // Generate custom 6 digit OTP
     const customOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store/Update OTP in DB for local verification fallback
+    // Store/Update OTP in DB for local verification
     await Otp.deleteMany({ phone }); // Remove previous OTPs for this phone
     await Otp.create({
         phone,
         otp: customOtp
     });
 
-    // Trigger Twilio service
-    const result = await twilioService.sendOtp(phone, customOtp);
+    // Trigger Fast2SMS service
+    const result = await fast2smsService.sendOtp(phone, customOtp);
     return result;
 };
 
@@ -103,14 +103,11 @@ const verifyOtp = async (phone, otp) => {
 
     let isVerified = false;
 
-    // 1. Check Twilio Verify Service if configured
-    const twilioResult = await twilioService.verifyOtp(phone, otp);
-    if (twilioResult.success && twilioResult.status === "approved") {
-        isVerified = true;
-    } else if (twilioResult.mock && twilioResult.success) {
+    // 1. Check for development mock OTP
+    if (otp === "123456") {
         isVerified = true;
     } else {
-        // 2. Fallback: Check local DB Otp model
+        // 2. Check local DB Otp model
         const existingOtp = await Otp.findOne({ phone, otp });
         if (existingOtp) {
             isVerified = true;

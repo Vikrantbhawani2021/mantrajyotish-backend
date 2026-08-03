@@ -1,42 +1,31 @@
 const express = require("express");
 const cors = require("cors");
-
 const routes = require("./routes");
+const notFoundMiddleware = require("./middlewares/notFound.middleware");
+const errorMiddleware = require("./middlewares/error.middleware");
 
 const app = express();
 
-// Middlewares - Increased payload size limit to 50mb for image uploads
+// Middlewares
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Health Check
+// Health Check Endpoint
 app.get("/", (req, res) => {
     res.json({
         success: true,
-        message: "Astro Backend Running Successfully"
+        message: "Backend API Service Running Successfully"
     });
 });
 
-// All API Routes
+// API Routes
 app.use("/api", routes);
 
-// 404 Handler for unmatched routes
-app.use((req, res, next) => {
-    res.status(404).json({
-        success: false,
-        message: `Route Not Found - ${req.method} ${req.originalUrl}.`
-    });
-});
+// 404 Handler
+app.use(notFoundMiddleware);
 
 // Global Error Handler
-app.use((err, req, res, next) => {
-    console.error(err);
-
-    res.status(err.status || 500).json({
-        success: false,
-        message: err.message || "Internal Server Error"
-    });
-});
+app.use(errorMiddleware);
 
 module.exports = app;

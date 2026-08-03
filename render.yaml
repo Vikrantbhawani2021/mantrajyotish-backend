@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: astro-backend
+    name: backend
     runtime: node
     plan: free
     buildCommand: npm install
