@@ -41,7 +41,6 @@ const registerUser = async (req, res, next) => {
             address,
             phone,
             email,
-            tuloId,
             role
         } = req.body;
 
@@ -70,8 +69,6 @@ const registerUser = async (req, res, next) => {
             name = `${firstname} ${lastname || ""}`.trim();
         }
 
-        const generatedTuloId = tuloId || `tulo_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-
         const user = await User.create({
             name: name || null,
             firstname: firstname || null,
@@ -87,7 +84,6 @@ const registerUser = async (req, res, next) => {
             address: address || null,
             phone,
             email: email ? email.toLowerCase() : null,
-            tuloId: generatedTuloId,
             role: role || "user",
             isProfileCompleted: Boolean(name || (firstname && lastname))
         });

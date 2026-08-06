@@ -97,12 +97,6 @@ const UserSchema = new mongoose.Schema(
       sparse: true,
     },
 
-    tuloId: {
-      type: String,
-      unique: true,
-      sparse: true,
-    },
-
     role: {
       type: String,
       enum: ["user", "astrologer", "admin"],

@@ -18,13 +18,9 @@ const UserLoginSchema = new mongoose.Schema(
             lowercase: true,
             trim: true
         },
-        tuloId: {
-            type: String,
-            default: null
-        },
         loginMethod: {
             type: String,
-            enum: ["otp", "tulo", "phone"],
+            enum: ["otp", "phone"],
             default: "otp"
         },
         lastLoginAt: {

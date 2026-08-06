@@ -13,9 +13,11 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: JWT_EXPIRES_IN
-        value: 7d
-      - key: TULO_JWT_SECRET
+        value: 15m
+      - key: JWT_REFRESH_SECRET
         sync: false
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN

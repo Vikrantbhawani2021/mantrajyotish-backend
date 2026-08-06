@@ -16,12 +16,6 @@ const connectDB = async () => {
                 console.log("Successfully dropped legacy non-sparse email_1 index");
             }
 
-            const tuloIdx = userIndexes.find(idx => idx.name === "tuloId_1");
-            if (tuloIdx && !tuloIdx.sparse) {
-                await usersCol.dropIndex("tuloId_1");
-                console.log("Successfully dropped legacy non-sparse tuloId_1 index");
-            }
-
             // Clean up legacy unique appointment_1 index from videosessions collection
             try {
                 const videoSessionsCol = mongoose.connection.collection("videosessions");

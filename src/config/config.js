@@ -20,9 +20,6 @@ module.exports = {
         secret: process.env.JWT_SECRET,
         expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     },
-    tulo: {
-        jwtSecret: process.env.TULO_JWT_SECRET,
-    },
     twilio: {
         accountSid: process.env.TWILIO_ACCOUNT_SID,
         authToken: process.env.TWILIO_AUTH_TOKEN,
