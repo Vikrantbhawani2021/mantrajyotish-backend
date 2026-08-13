@@ -173,7 +173,7 @@ const updateProfile = async (req, res, next) => {
         const user = await User.findByIdAndUpdate(
             userId,
             { $set: updates },
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
         );
 
         if (!user) {

@@ -6,7 +6,7 @@ const astroInterviewController = require("../controllers/astroInterview.controll
 const authMiddleware = require("../middlewares/auth.middleware");
 
 // 1. Astrologer Requests Interview
-router.post("/request", astroInterviewController.requestInterview);
+router.post("/request", authMiddleware, astroInterviewController.requestInterview);
 
 // 2. Admin Schedules Interview (Date, Time, Google Meet Link)
 router.put("/schedule/:id", astroInterviewController.scheduleInterview);
@@ -36,5 +36,8 @@ router.get("/pending", astroInterviewController.getPendingInterviews);
 router.get("/details", astroInterviewController.getMyInterview);
 router.get("/my-interview", astroInterviewController.getMyInterview);
 router.get("/astrologer/:id", astroInterviewController.getMyInterview);
+
+// 6. Token refresh/generation on-demand
+router.get("/token/:id", astroInterviewController.getInterviewToken);
 
 module.exports = router;

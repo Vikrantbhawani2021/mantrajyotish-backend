@@ -8,8 +8,12 @@ const requestInterview = async (req, res, next) => {
 
         // If logged in via JWT
         if (!astrologerId && req.user) {
-            const astro = await Astrologer.findOne({ astrologerLogin: req.user.userId });
-            if (astro) astrologerId = astro._id;
+            if (req.user.role === "astrologer") {
+                astrologerId = req.user.userId;
+            } else {
+                const astro = await Astrologer.findOne({ astrologerLogin: req.user.userId });
+                if (astro) astrologerId = astro._id;
+            }
         }
 
         const notes = req.body.notes || req.body.requestNotes || "";
@@ -247,6 +251,51 @@ const getMyInterview = async (req, res, next) => {
     }
 };
 
+// 7. GENERATE NEW INTERVIEW TOKEN ON DEMAND
+const getInterviewToken = async (req, res, next) => {
+    try {
+        const { id } = req.params; // interviewId
+        const { role } = req.query; // "admin" or "astrologer"
+        
+        const AstroInterview = require("../models/astroInterview.model");
+        const agoraService = require("../services/agora.service");
+
+        const interview = await AstroInterview.findById(id);
+        if (!interview) {
+            return res.status(404).json({ success: false, message: "Interview session not found" });
+        }
+
+        if (!interview.agoraChannel) {
+            return res.status(400).json({ success: false, message: "Interview channel is not scheduled yet" });
+        }
+
+        const tokenExpireTime = 7200; // 2 hours
+        const targetRole = role === "admin" ? "publisher" : "publisher";
+        const uid = role === "admin" ? interview.agoraAdminUid : interview.agoraAstrologerUid;
+
+        const tokenData = agoraService.generateRtcToken(interview.agoraChannel, uid, targetRole, tokenExpireTime);
+
+        // Update stored token in database
+        if (role === "admin") {
+            interview.agoraAdminToken = tokenData.token;
+        } else {
+            interview.agoraAstrologerToken = tokenData.token;
+        }
+        await interview.save();
+
+        return res.status(200).json({
+            success: true,
+            token: tokenData.token,
+            channelName: interview.agoraChannel,
+            uid,
+            appId: tokenData.appId
+        });
+
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     requestInterview,
     scheduleInterview,
@@ -255,5 +304,6 @@ module.exports = {
     failInterview,
     getAllInterviews,
     getPendingInterviews,
-    getMyInterview
+    getMyInterview,
+    getInterviewToken
 };

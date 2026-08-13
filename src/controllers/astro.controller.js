@@ -109,13 +109,6 @@ const createAstrologer = async (req, res, next) => {
         }
 
         if (!astrologer) {
-            const lastAstrologer = await Astrologer.findOne().sort({ createdAt: -1 });
-            if (lastAstrologer) {
-                astrologer = await astroService.updateAstrologer(lastAstrologer._id, payload);
-            }
-        }
-
-        if (!astrologer) {
             astrologer = await astroService.createAstrologer(payload);
         }
 

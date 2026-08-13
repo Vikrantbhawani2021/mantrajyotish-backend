@@ -6,8 +6,8 @@ const adminController = require("../controllers/admin.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
 
 // Admin Registration & Login
-router.post("/register", adminController.registerAdmin);
-router.post("/create", adminController.registerAdmin);
+router.post("/register", authMiddleware, adminController.registerAdmin);
+router.post("/create", authMiddleware, adminController.registerAdmin);
 router.post("/login", adminController.loginAdmin);
 
 // Logged-in Admin Profile

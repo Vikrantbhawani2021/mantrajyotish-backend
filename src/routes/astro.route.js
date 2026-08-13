@@ -4,6 +4,7 @@ const router = express.Router();
 
 const astroController = require("../controllers/astro.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
+const adminMiddleware = require("../middlewares/admin.middleware");
 
 // Profile & Creation
 router.post("/create", astroController.createAstrologer);
@@ -13,13 +14,13 @@ router.get("/all", astroController.getAllAstrologers);
 router.get("/online", astroController.getOnlineAstrologers);
 
 // Admin Approval & Pending Requests (Supports both URL param :id and Body JSON { "astrologerId": "..." } / { "email": "..." })
-router.get("/pending", astroController.getPendingAstrologers);
-router.put("/approve/:id", astroController.approveAstrologer);
-router.post("/approve", astroController.approveAstrologer);
-router.put("/approve", astroController.approveAstrologer);
-router.put("/reject/:id", astroController.rejectAstrologer);
-router.post("/reject", astroController.rejectAstrologer);
-router.put("/reject", astroController.rejectAstrologer);
+router.get("/pending", authMiddleware, adminMiddleware, astroController.getPendingAstrologers);
+router.put("/approve/:id", authMiddleware, adminMiddleware, astroController.approveAstrologer);
+router.post("/approve", authMiddleware, adminMiddleware, astroController.approveAstrologer);
+router.put("/approve", authMiddleware, adminMiddleware, astroController.approveAstrologer);
+router.put("/reject/:id", authMiddleware, adminMiddleware, astroController.rejectAstrologer);
+router.post("/reject", authMiddleware, adminMiddleware, astroController.rejectAstrologer);
+router.put("/reject", authMiddleware, adminMiddleware, astroController.rejectAstrologer);
 
 // Online/Offline Status Toggle
 router.put("/toggle-online", astroController.toggleOnlineStatus);
@@ -30,6 +31,6 @@ router.get("/:id", astroController.getAstrologerById);
 
 // Update & Delete
 router.put("/update/:id", authMiddleware, astroController.updateAstrologer);
-router.delete("/delete/:id", authMiddleware, astroController.deleteAstrologer);
+router.delete("/delete/:id", authMiddleware, adminMiddleware, astroController.deleteAstrologer);
 
 module.exports = router;

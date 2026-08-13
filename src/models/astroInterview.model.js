@@ -51,6 +51,36 @@ const AstroInterviewSchema = new mongoose.Schema(
         completedAt: {
             type: Date,
             default: null
+        },
+
+        // ─── Agora RTC Fields for Video Interview ─────────────────────────
+        agoraChannel: {
+            type: String,
+            default: null,
+            trim: true
+        },
+
+        // Pre-generated Agora token for the admin (UID: 1)
+        agoraAdminToken: {
+            type: String,
+            default: null
+        },
+
+        // Pre-generated Agora token for the astrologer (UID: 2)
+        agoraAstrologerToken: {
+            type: String,
+            default: null
+        },
+
+        // Numeric UIDs assigned in the Agora channel
+        agoraAdminUid: {
+            type: Number,
+            default: 1
+        },
+
+        agoraAstrologerUid: {
+            type: Number,
+            default: 2
         }
     },
     {

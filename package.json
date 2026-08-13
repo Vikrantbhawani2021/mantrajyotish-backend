@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
+    
   },
   "dependencies": {
     "agora-token": "^2.0.5",

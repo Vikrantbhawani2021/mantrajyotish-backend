@@ -1,8 +1,10 @@
 const AstrologerLogin = require("../models/astrologerLogin.model");
 const Astrologer = require("../models/astro.model");
+const AstroInterview = require("../models/astroInterview.model");
 const Otp = require("../models/otp.model");
 const twilioService = require("../services/twilio.service");
 const emailService = require("../services/email.service");
+const astroInterviewService = require("../services/astroInterview.service");
 const bcrypt = require("bcrypt");
 const { generateToken } = require("../utils/jwt");
 
@@ -69,6 +71,13 @@ exports.createAstrologerLogin = async (req, res) => {
             status: "pending"
         });
 
+        // Automatically Request/Create Interview record on successful signup
+        try {
+            await astroInterviewService.requestInterview(astrologer._id, "Auto-created on signup registration");
+        } catch (interviewErr) {
+            console.error("Failed to automatically create interview request on registration:", interviewErr.message);
+        }
+
         // Generate JWT token
         const token = generateToken({
             userId: astrologer._id,
@@ -124,19 +133,13 @@ exports.loginAstrologer = async (req, res) => {
         }
 
         // Check Admin Approval Status
-        if (astrologer.status === "pending") {
-            return res.status(403).json({
-                success: false,
-                message: "Your account is pending admin approval. Please wait for admin approval."
-            });
-        }
-
         if (astrologer.status === "rejected") {
             return res.status(403).json({
                 success: false,
                 message: "Your registration request has been rejected by Admin."
             });
         }
+
 
         // Save login timestamp & audit record in AstrologerLogin
         try {
@@ -347,6 +350,85 @@ exports.forgotPasswordReset = async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message || "Server Error"
+        });
+    }
+};
+
+// 5. CHECK APPROVAL & INTERVIEW STATUS (For frontend polling)
+exports.getApprovalStatus = async (req, res) => {
+    try {
+        let astrologerId = null;
+
+        // Extract from auth token
+        if (req.user && req.user.userId) {
+            astrologerId = req.user.userId;
+        }
+
+        if (!astrologerId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized. Token missing or invalid."
+            });
+        }
+
+        const astrologer = await Astrologer.findById(astrologerId);
+        if (!astrologer) {
+            return res.status(404).json({
+                success: false,
+                message: "Astrologer profile not found"
+            });
+        }
+
+        // Fetch corresponding interview session
+        const interview = await AstroInterview.findOne({ astrologer: astrologerId });
+
+        // Build standard structure to match checkApprovalStatusApi expected values
+        let responseData = {
+            success: true,
+            status: astrologer.status,        // "pending" | "approved" | "rejected"
+            isApproved: astrologer.status === "approved",
+            interviewStatus: interview ? interview.status : "not_requested",
+            // "requested" | "scheduled" | "passed" | "failed" | "cancelled" | "not_requested"
+            date: null,
+            time: null,
+            interviewDate: null,
+            meetingLink: null,
+            link: null,          // alias for meetingLink
+            agoraAppId: process.env.AGORA_APP_ID || "MOCK_AGORA_APP_ID",
+            agoraChannel: null,
+            agoraToken: null,    // astrologer's Agora RTC token
+            agoraUid: 2,         // astrologer UID in channel
+            note: interview ? (interview.interviewerNotes || interview.requestNotes) : null
+        };
+
+        if (interview && interview.interviewDate) {
+            responseData.interviewDate = interview.interviewDate;
+            const d = new Date(interview.interviewDate);
+            responseData.date = d.toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "long",
+                year: "numeric"
+            });
+            responseData.time = d.toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true
+            });
+            responseData.meetingLink = interview.meetingLink || null;
+            responseData.link        = interview.meetingLink || null;
+            responseData.agoraChannel = interview.agoraChannel || null;
+            // The astrologer-specific Agora token & UID
+            responseData.agoraToken = interview.agoraAstrologerToken || null;
+            responseData.agoraUid   = interview.agoraAstrologerUid  || 2;
+        }
+
+        return res.status(200).json(responseData);
+
+    } catch (error) {
+        console.error("Get Approval Status Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server Error"
         });
     }
 };

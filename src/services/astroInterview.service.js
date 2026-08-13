@@ -1,8 +1,15 @@
 const AstroInterview = require("../models/astroInterview.model");
 const Astrologer = require("../models/astro.model");
+const AstrologerLogin = require("../models/astrologerLogin.model");
+const agoraService = require("./agora.service");
 const mongoose = require("mongoose");
 
-const isValidObjectId = (id) => typeof id === "string" && mongoose.Types.ObjectId.isValid(id) && id.length === 24;
+const isValidObjectId = (id) => {
+    if (!id) return false;
+    if (typeof id === "object" && mongoose.Types.ObjectId.isValid(id)) return true;
+    const str = String(id);
+    return mongoose.Types.ObjectId.isValid(str) && str.length === 24;
+};
 
 /**
  * Astrologer Requests an Interview
@@ -14,10 +21,33 @@ const requestInterview = async (astrologerIdOrEmail, requestNotes = "") => {
         astrologer = await Astrologer.findOne({ email: astrologerIdOrEmail.toLowerCase() });
     } else if (astrologerIdOrEmail && isValidObjectId(astrologerIdOrEmail)) {
         astrologer = await Astrologer.findById(astrologerIdOrEmail);
+        if (!astrologer) {
+            astrologer = await Astrologer.findOne({ astrologerLogin: astrologerIdOrEmail });
+        }
     }
 
-    if (!astrologer) {
-        // Fallback: Latest registered astrologer
+    // Try finding by AstrologerLogin if not found yet
+    if (!astrologer && astrologerIdOrEmail) {
+        let loginInfo = null;
+        if (isValidObjectId(astrologerIdOrEmail)) {
+            loginInfo = await AstrologerLogin.findById(astrologerIdOrEmail);
+        } else if (typeof astrologerIdOrEmail === "string" && astrologerIdOrEmail.includes("@")) {
+            loginInfo = await AstrologerLogin.findOne({ email: astrologerIdOrEmail.toLowerCase() });
+        }
+        if (loginInfo) {
+            // Auto-create Astrologer profile for this login
+            astrologer = await Astrologer.create({
+                astrologerLogin: loginInfo._id,
+                name: loginInfo.name || "New Astrologer",
+                email: loginInfo.email,
+                status: "pending",
+                isVerified: false
+            });
+        }
+    }
+
+    if (!astrologer && !astrologerIdOrEmail) {
+        // Fallback only if no identifier was passed
         astrologer = await Astrologer.findOne().sort({ createdAt: -1 });
     }
 
@@ -46,7 +76,7 @@ const requestInterview = async (astrologerIdOrEmail, requestNotes = "") => {
 };
 
 /**
- * Admin Schedules Interview with Date, Time, and Google Meet Link
+ * Admin Schedules Interview with Date, Time, and Agora Channel/Token Setup
  */
 const scheduleInterview = async (identifier, interviewDate, meetingLink, interviewerNotes = "") => {
     let interview = null;
@@ -94,10 +124,32 @@ const scheduleInterview = async (identifier, interviewDate, meetingLink, intervi
         throw new Error("interviewDate is required for scheduling");
     }
 
+    // Generate Agora channel name and tokens
+    const now = Date.now();
+    const astrologerIdStr = String(interview.astrologer);
+    const channelName = `interview_${astrologerIdStr.substring(18)}_${now}`;
+
+    // Token expires in 2 hours
+    const tokenExpireTime = 7200;
+
+    // Admin RTC token (UID 1)
+    const adminTokenData = agoraService.generateRtcToken(channelName, 1, "publisher", tokenExpireTime);
+    // Astrologer RTC token (UID 2)
+    const astrologerTokenData = agoraService.generateRtcToken(channelName, 2, "publisher", tokenExpireTime);
+
     interview.interviewDate = new Date(interviewDate);
-    interview.meetingLink = meetingLink || "https://meet.google.com/new";
+    // Custom Agora Web Interview Link (fallback default is set, but frontends will override with Agora UI)
+    interview.meetingLink = meetingLink || `https://astrologer-interview.digitalinapp.com/room/${channelName}`;
     interview.status = "scheduled";
     interview.scheduledAt = new Date();
+    
+    // Set Agora Specific fields
+    interview.agoraChannel = channelName;
+    interview.agoraAdminToken = adminTokenData.token;
+    interview.agoraAstrologerToken = astrologerTokenData.token;
+    interview.agoraAdminUid = 1;
+    interview.agoraAstrologerUid = 2;
+
     if (interviewerNotes) interview.interviewerNotes = interviewerNotes;
 
     await interview.save();
