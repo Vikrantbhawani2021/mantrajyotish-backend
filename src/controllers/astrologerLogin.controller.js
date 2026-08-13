@@ -363,7 +363,14 @@ exports.getApprovalStatus = async (req, res) => {
             });
         }
 
-        const astrologer = await Astrologer.findById(astrologerId);
+        let astrologer = await Astrologer.findById(astrologerId);
+        if (!astrologer) {
+            astrologer = await Astrologer.findOne({ astrologerLogin: astrologerId });
+        }
+        if (!astrologer && req.user.email) {
+            astrologer = await Astrologer.findOne({ email: String(req.user.email).toLowerCase() });
+        }
+
         if (!astrologer) {
             return res.status(404).json({
                 success: false,
@@ -372,7 +379,10 @@ exports.getApprovalStatus = async (req, res) => {
         }
 
         // Fetch corresponding interview session
-        const interview = await AstroInterview.findOne({ astrologer: astrologerId });
+        let interview = await AstroInterview.findOne({ astrologer: astrologer._id });
+        if (!interview) {
+            interview = await AstroInterview.findOne({ astrologer: astrologerId });
+        }
 
         // Build standard structure to match checkApprovalStatusApi expected values
         let responseData = {
@@ -380,16 +390,15 @@ exports.getApprovalStatus = async (req, res) => {
             status: astrologer.status,        // "pending" | "approved" | "rejected"
             isApproved: astrologer.status === "approved",
             interviewStatus: interview ? interview.status : "not_requested",
-            // "requested" | "scheduled" | "passed" | "failed" | "cancelled" | "not_requested"
             date: null,
             time: null,
-            interviewDate: null,
-            meetingLink: null,
-            link: null,          // alias for meetingLink
-            agoraAppId: process.env.AGORA_APP_ID || "MOCK_AGORA_APP_ID",
-            agoraChannel: null,
-            agoraToken: null,    // astrologer's Agora RTC token
-            agoraUid: 2,         // astrologer UID in channel
+            interviewDate: interview ? interview.interviewDate : null,
+            meetingLink: interview ? (interview.meetingLink || null) : null,
+            link: interview ? (interview.meetingLink || null) : null,
+            agoraAppId: (interview && interview.agoraAppId) || process.env.AGORA_APP_ID || "af89ac0f87f4412ea75f23aba4717e04",
+            agoraChannel: interview ? (interview.agoraChannel || null) : null,
+            agoraToken: interview ? (interview.agoraAstrologerToken || null) : null,
+            agoraUid: interview ? (interview.agoraAstrologerUid || 2) : 2,
             note: interview ? (interview.interviewerNotes || interview.requestNotes) : null
         };
 
@@ -406,12 +415,12 @@ exports.getApprovalStatus = async (req, res) => {
                 minute: "2-digit",
                 hour12: true
             });
-            responseData.meetingLink = interview.meetingLink || null;
-            responseData.link        = interview.meetingLink || null;
-            responseData.agoraChannel = interview.agoraChannel || null;
-            // The astrologer-specific Agora token & UID
-            responseData.agoraToken = interview.agoraAstrologerToken || null;
-            responseData.agoraUid   = interview.agoraAstrologerUid  || 2;
+        }
+
+        if (interview) {
+            if (interview.agoraChannel)         responseData.agoraChannel = interview.agoraChannel;
+            if (interview.agoraAstrologerToken) responseData.agoraToken   = interview.agoraAstrologerToken;
+            if (interview.agoraAstrologerUid)   responseData.agoraUid     = interview.agoraAstrologerUid;
         }
 
         return res.status(200).json(responseData);
