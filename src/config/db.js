@@ -1,6 +1,12 @@
 const mongoose = require("mongoose");
 
+let isConnected = false;
+
 const connectDB = async () => {
+    if (mongoose.connection.readyState >= 1) {
+        return;
+    }
+
     try {
         await mongoose.connect(process.env.MONGO_URI);
         console.log("MongoDB Connected");
@@ -65,8 +71,8 @@ const connectDB = async () => {
           }
 
     } catch (error) {
-        console.log(error);
-        process.exit(1);
+        console.error("MongoDB Connection Error:", error);
+        throw error;
     }
 };
 

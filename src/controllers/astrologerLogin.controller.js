@@ -2,8 +2,7 @@ const AstrologerLogin = require("../models/astrologerLogin.model");
 const Astrologer = require("../models/astro.model");
 const AstroInterview = require("../models/astroInterview.model");
 const Otp = require("../models/otp.model");
-const twilioService = require("../services/twilio.service");
-const emailService = require("../services/email.service");
+const fast2smsService = require("../services/fast2sms.service");
 const astroInterviewService = require("../services/astroInterview.service");
 const bcrypt = require("bcrypt");
 const { generateToken } = require("../utils/jwt");
@@ -100,25 +99,31 @@ exports.createAstrologerLogin = async (req, res) => {
     }
 };
 
-// 2. LOGIN ASTROLOGER (Only email & password required)
 exports.loginAstrologer = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const body = req.body || {};
+        const identifier = body.email || body.phone || body.identifier;
+        const password = body.password;
 
-        if (!email || !password) {
+        if (!identifier || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required"
+                message: "Email or phone and password are required"
             });
         }
 
-        // Find registered astrologer by email
-        const astrologer = await Astrologer.findOne({ email: email.toLowerCase() });
+        const isEmail = typeof identifier === "string" && identifier.includes("@");
+        const query = isEmail
+            ? { email: identifier.toLowerCase() }
+            : { $or: [{ phone: identifier }, { email: String(identifier).toLowerCase() }] };
+
+        // Find registered astrologer by email or phone
+        const astrologer = await Astrologer.findOne(query);
 
         if (!astrologer || !astrologer.password) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password"
+                message: "Invalid credentials. Account not found."
             });
         }
 
@@ -128,7 +133,7 @@ exports.loginAstrologer = async (req, res) => {
         if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password"
+                message: "Invalid credentials."
             });
         }
 
@@ -172,7 +177,7 @@ exports.loginAstrologer = async (req, res) => {
         console.error("Login Error:", error);
         res.status(500).json({
             success: false,
-            message: "Server Error"
+            message: error.message || "Server Error"
         });
     }
 };
@@ -220,24 +225,13 @@ exports.forgotPasswordSendOtp = async (req, res) => {
         }
 
         let smsResult = null;
-        let emailResult = null;
 
-        // 1. Send SMS via Twilio if phone is available
+        // Send SMS via Fast2SMS if phone is available
         if (targetPhone) {
             try {
-                smsResult = await twilioService.sendOtp(targetPhone, customOtp);
+                smsResult = await fast2smsService.sendOtp(targetPhone, customOtp);
             } catch (err) {
-                console.warn("Twilio SMS send error:", err.message);
-            }
-        }
-
-        // 2. Send Email via Nodemailer if email is available
-        if (targetEmail) {
-            try {
-                emailResult = await emailService.sendOtpEmail(targetEmail, customOtp);
-            } catch (err) {
-                console.warn("Email send error:", err.message);
-                emailResult = { success: false, error: err.message };
+                console.warn("Fast2SMS send error:", err.message);
             }
         }
 
@@ -299,18 +293,16 @@ exports.forgotPasswordReset = async (req, res) => {
 
         let isVerified = false;
 
-        // 1. Check Twilio Verify Service if configured
-        const twilioResult = await twilioService.verifyOtp(targetPhone, otp);
-        if (twilioResult.success && twilioResult.status === "approved") {
+        // Check local DB Otp model (phone or email key)
+        const existingOtp = await Otp.findOne({
+            $or: [
+                { phone: targetPhone, otp },
+                { phone: targetEmail, otp }
+            ]
+        });
+
+        if (existingOtp) {
             isVerified = true;
-        } else if (twilioResult.mock && twilioResult.success) {
-            isVerified = true;
-        } else {
-            // 2. Fallback: Check local DB Otp model
-            const existingOtp = await Otp.findOne({ phone: targetPhone, otp });
-            if (existingOtp) {
-                isVerified = true;
-            }
         }
 
         if (!isVerified) {

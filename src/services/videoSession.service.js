@@ -271,7 +271,7 @@ const createVideoSession = async (videoData) => {
         provider: "Agora",
         roomId: roomId,
         channelName: roomId,
-        joinUrl: `https://kalpjoytish-app.com/video/${roomId}`,
+        joinUrl: `${(process.env.APP_URL || process.env.FRONTEND_URL || "https://mantrajyotish.com").replace(/\/$/, "")}/video/${roomId}`,
         startTime: videoData.startTime ? new Date(videoData.startTime) : new Date(),
         endTime: videoData.endTime ? new Date(videoData.endTime) : new Date(Date.now() + 30 * 60 * 1000),
         duration: videoData.duration || 30,
