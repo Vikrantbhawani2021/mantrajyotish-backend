@@ -276,15 +276,29 @@ const getMyInterview = async (req, res, next) => {
 
         const formattedResponse = {
             ...interviewObj,
+            status: interviewObj.astrologer?.status || "pending",
+            interviewStatus: interviewObj.status,
+            interviewDate: interviewObj.interviewDate,
             date: formattedDate,
             time: formattedTime,
             meetingLink: interviewObj.meetingLink || null,
-            notes: interviewObj.interviewerNotes || interviewObj.requestNotes || null
+            notes: interviewObj.interviewerNotes || interviewObj.requestNotes || null,
+            agoraAppId: process.env.AGORA_APP_ID || "af89ac0f87f4412ea75f23aba4717e04",
+            agoraChannel: interviewObj.agoraChannel || null,
+            agoraToken: interviewObj.agoraAstrologerToken || null,
+            agoraUid: interviewObj.agoraAstrologerUid || 2
         };
 
         return res.status(200).json({
             success: true,
             message: "Astrologer interview details fetched successfully",
+            status: interviewObj.astrologer?.status || "pending",
+            interviewStatus: interviewObj.status,
+            interviewDate: interviewObj.interviewDate,
+            agoraAppId: process.env.AGORA_APP_ID || "af89ac0f87f4412ea75f23aba4717e04",
+            agoraChannel: interviewObj.agoraChannel || null,
+            agoraToken: interviewObj.agoraAstrologerToken || null,
+            agoraUid: interviewObj.agoraAstrologerUid || 2,
             data: formattedResponse
         });
 

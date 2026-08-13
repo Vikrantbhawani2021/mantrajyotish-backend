@@ -19,6 +19,8 @@ const normalizeAstroData = async (req) => {
     }
 
     let name = body.name || body.fullName || body.astrologerName || undefined;
+    let phone = body.phone || body.mobileNumber || body.mobile || null;
+    let password = body.password || null;
 
     // Auto-fetch name and email from AstrologerLogin record if ID is provided
     if (astrologerLoginId && (!name || !email)) {
@@ -36,7 +38,13 @@ const normalizeAstroData = async (req) => {
     if (astrologerLoginId) payload.astrologerLogin = astrologerLoginId;
     if (userId) payload.user = userId;
     if (name) payload.name = name;
-    if (email) payload.email = email;
+    if (email) payload.email = email.toLowerCase();
+    if (phone) payload.phone = phone;
+
+    if (password && typeof password === "string" && password.trim()) {
+        const bcrypt = require("bcrypt");
+        payload.password = await bcrypt.hash(password.trim(), 10);
+    }
 
     const rawProfileImage = body.profilePhoto || body.profileImage;
     if (rawProfileImage) {
@@ -104,6 +112,10 @@ const createAstrologer = async (req, res, next) => {
         if (queryConditions.length > 0) {
             const existing = await Astrologer.findOne({ $or: queryConditions });
             if (existing) {
+                // If payload does not contain password, preserve existing password
+                if (!payload.password && existing.password) {
+                    payload.password = existing.password;
+                }
                 astrologer = await astroService.updateAstrologer(existing._id, payload);
             }
         }
