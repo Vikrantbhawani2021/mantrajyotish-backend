@@ -11,22 +11,29 @@ const { generateToken } = require("../utils/jwt");
 exports.createAstrologerLogin = async (req, res) => {
     try {
         const body = req.body || {};
-        const { name, email, password } = body;
+        const email = (body.email || body.emailAddress || "").trim().toLowerCase();
+        const phone = body.phone || body.mobileNumber || body.mobile || null;
+        const name = body.name || body.fullName || body.astrologerName || "Astrologer";
+        const password = body.password;
 
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required"
+                message: "Email and password are required for registration"
             });
         }
 
-        // Check if email already registered
-        const existingAstrologer = await Astrologer.findOne({ email: email.toLowerCase() });
+        // Check if email or phone already registered
+        const existingQuery = phone 
+            ? { $or: [{ email }, { phone }] }
+            : { email };
+
+        const existingAstrologer = await Astrologer.findOne(existingQuery);
 
         if (existingAstrologer) {
             return res.status(400).json({
                 success: false,
-                message: "Email already registered"
+                message: "Email or phone number is already registered. Please log in instead."
             });
         }
 
@@ -50,9 +57,11 @@ exports.createAstrologerLogin = async (req, res) => {
 
         // Save Astrologer record
         const astrologer = await Astrologer.create({
-            name: name || body.fullName || body.astrologerName || null,
-            email: email.toLowerCase(),
+            name,
+            email,
+            phone,
             password: hashedPassword,
+            status: "pending",
             profileImage,
             introduction,
             about,
@@ -66,8 +75,7 @@ exports.createAstrologerLogin = async (req, res) => {
             certificateFile,
             certificateName,
             achievements,
-            isAvailable: true,
-            status: "pending"
+            isAvailable: true
         });
 
         // Automatically Request/Create Interview record on successful signup
