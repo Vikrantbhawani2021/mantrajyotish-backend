@@ -78,13 +78,6 @@ exports.createAstrologerLogin = async (req, res) => {
             isAvailable: true
         });
 
-        // Automatically Request/Create Interview record on successful signup
-        try {
-            await astroInterviewService.requestInterview(astrologer._id, "Auto-created on signup registration");
-        } catch (interviewErr) {
-            console.error("Failed to automatically create interview request on registration:", interviewErr.message);
-        }
-
         // Generate JWT token
         const token = generateToken({
             userId: astrologer._id,
