@@ -28,6 +28,16 @@ router.put("/fail/:id", astroInterviewController.failInterview);
 router.put("/fail", astroInterviewController.failInterview);
 router.post("/fail", astroInterviewController.failInterview);
 
+// 3c. Mark Interview Completed APIs
+router.put("/complete/:id", astroInterviewController.completeInterview);
+router.put("/complete", astroInterviewController.completeInterview);
+router.post("/complete", astroInterviewController.completeInterview);
+
+// 3d. Update Interview Notes APIs
+router.put("/notes/:id", astroInterviewController.updateNotes);
+router.put("/notes", astroInterviewController.updateNotes);
+router.post("/notes", astroInterviewController.updateNotes);
+
 // 4. Listing & Filtering (Admin)
 router.get("/all", astroInterviewController.getAllInterviews);
 router.get("/pending", astroInterviewController.getPendingInterviews);

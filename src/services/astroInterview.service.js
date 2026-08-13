@@ -14,7 +14,7 @@ const isValidObjectId = (id) => {
 /**
  * Astrologer Requests an Interview
  */
-const requestInterview = async (astrologerIdOrEmail, requestNotes = "") => {
+const requestInterview = async (astrologerIdOrEmail, requestNotes = "", preferredSlots = []) => {
     let astrologer = null;
 
     if (astrologerIdOrEmail && typeof astrologerIdOrEmail === "string" && astrologerIdOrEmail.includes("@")) {
@@ -62,13 +62,17 @@ const requestInterview = async (astrologerIdOrEmail, requestNotes = "") => {
         interview.status = "requested";
         interview.result = "pending";
         interview.requestNotes = requestNotes || interview.requestNotes;
+        if (Array.isArray(preferredSlots) && preferredSlots.length > 0) {
+            interview.preferredSlots = preferredSlots;
+        }
         await interview.save();
     } else {
         interview = await AstroInterview.create({
             astrologer: astrologer._id,
             status: "requested",
             result: "pending",
-            requestNotes
+            requestNotes,
+            preferredSlots
         });
     }
 
@@ -217,6 +221,87 @@ const evaluateInterview = async (identifier, result, interviewerNotes = "") => {
 };
 
 /**
+ * Mark Interview Completed (Without immediate Pass/Fail decision)
+ */
+const completeInterview = async (identifier, interviewerNotes = "") => {
+    let interview = null;
+    if (identifier && isValidObjectId(identifier)) {
+        try {
+            interview = await AstroInterview.findById(identifier);
+        } catch (e) {}
+    }
+
+    if (!interview && identifier) {
+        let astrologerId = null;
+        if (typeof identifier === "string" && identifier.includes("@")) {
+            const astro = await Astrologer.findOne({ email: identifier.toLowerCase() });
+            if (astro) astrologerId = astro._id;
+        } else if (isValidObjectId(identifier)) {
+            astrologerId = identifier;
+        }
+
+        if (astrologerId) {
+            interview = await AstroInterview.findOne({ astrologer: astrologerId });
+        }
+    }
+
+    if (!interview) {
+        interview = await AstroInterview.findOne({ status: "scheduled" }).sort({ updatedAt: -1 });
+    }
+
+    if (!interview) {
+        throw new Error("No scheduled interview session found to complete");
+    }
+
+    interview.status = "completed";
+    interview.completedAt = new Date();
+    if (interviewerNotes) interview.interviewerNotes = interviewerNotes;
+
+    await interview.save();
+
+    return await AstroInterview.findById(interview._id).populate("astrologer");
+};
+
+/**
+ * Update Interviewer Notes for an Interview
+ */
+const updateInterviewNotes = async (identifier, interviewerNotes = "") => {
+    let interview = null;
+    if (identifier && isValidObjectId(identifier)) {
+        try {
+            interview = await AstroInterview.findById(identifier);
+        } catch (e) {}
+    }
+
+    if (!interview && identifier) {
+        let astrologerId = null;
+        if (typeof identifier === "string" && identifier.includes("@")) {
+            const astro = await Astrologer.findOne({ email: identifier.toLowerCase() });
+            if (astro) astrologerId = astro._id;
+        } else if (isValidObjectId(identifier)) {
+            astrologerId = identifier;
+        }
+
+        if (astrologerId) {
+            interview = await AstroInterview.findOne({ astrologer: astrologerId });
+        }
+    }
+
+    if (!interview) {
+        interview = await AstroInterview.findOne().sort({ updatedAt: -1 });
+    }
+
+    if (!interview) {
+        throw new Error("Interview record not found to save notes");
+    }
+
+    interview.interviewerNotes = interviewerNotes;
+    await interview.save();
+
+    return await AstroInterview.findById(interview._id).populate("astrologer");
+};
+
+/**
  * Get All Interviews for Admin
  */
 const getAllInterviews = async (filter = {}) => {
@@ -244,6 +329,8 @@ module.exports = {
     requestInterview,
     scheduleInterview,
     evaluateInterview,
+    completeInterview,
+    updateInterviewNotes,
     getAllInterviews,
     getAstrologerInterview
 };

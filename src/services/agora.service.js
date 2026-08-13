@@ -8,7 +8,7 @@ const { RtcTokenBuilder, RtcRole } = require("agora-token");
  * @param {number} expireTimeInSeconds - Token validity duration in seconds (default 3600 = 1 hr)
  */
 const generateRtcToken = (channelName, uid = 0, role = "publisher", expireTimeInSeconds = 3600) => {
-    const appId = process.env.AGORA_APP_ID || "MOCK_AGORA_APP_ID";
+    const appId = process.env.AGORA_APP_ID || "af89ac0f87f4412ea75f23aba4717e04";
     const appCertificate = process.env.AGORA_APP_CERTIFICATE || "";
 
     if (!channelName) {

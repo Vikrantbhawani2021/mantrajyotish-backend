@@ -17,8 +17,9 @@ const requestInterview = async (req, res, next) => {
         }
 
         const notes = req.body.notes || req.body.requestNotes || "";
+        const preferredSlots = req.body.preferredSlots || [];
 
-        const result = await astroInterviewService.requestInterview(astrologerId, notes);
+        const result = await astroInterviewService.requestInterview(astrologerId, notes, preferredSlots);
 
         return res.status(201).json({
             success: true,
@@ -137,6 +138,50 @@ const failInterview = async (req, res, next) => {
         return res.status(200).json({
             success: true,
             message: "Interview marked as FAILED. Astrologer status automatically updated to REJECTED.",
+            data: result
+        });
+
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// 3c. MARK INTERVIEW COMPLETED HANDLER
+const completeInterview = async (req, res, next) => {
+    try {
+        const identifier = req.params.id || req.body.interviewId || req.body.astrologerId || req.body.email || req.body.id;
+        const notes = req.body.interviewerNotes || req.body.notes || "";
+
+        const result = await astroInterviewService.completeInterview(identifier, notes);
+
+        return res.status(200).json({
+            success: true,
+            message: "Interview marked as COMPLETED successfully.",
+            data: result
+        });
+
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// 3d. UPDATE INTERVIEW NOTES HANDLER
+const updateNotes = async (req, res, next) => {
+    try {
+        const identifier = req.params.id || req.body.interviewId || req.body.astrologerId || req.body.email || req.body.id;
+        const notes = req.body.interviewerNotes || req.body.notes || "";
+
+        const result = await astroInterviewService.updateInterviewNotes(identifier, notes);
+
+        return res.status(200).json({
+            success: true,
+            message: "Interview notes saved successfully.",
             data: result
         });
 
@@ -302,6 +347,8 @@ module.exports = {
     evaluateInterview,
     passInterview,
     failInterview,
+    completeInterview,
+    updateNotes,
     getAllInterviews,
     getPendingInterviews,
     getMyInterview,

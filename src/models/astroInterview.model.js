@@ -10,7 +10,7 @@ const AstroInterviewSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["requested", "scheduled", "passed", "failed", "cancelled"],
+            enum: ["requested", "scheduled", "completed", "passed", "failed", "cancelled"],
             default: "requested"
         },
 
@@ -36,6 +36,13 @@ const AstroInterviewSchema = new mongoose.Schema(
             default: null,
             trim: true
         },
+
+        preferredSlots: [
+            {
+                date: { type: String, default: null },
+                time: { type: String, default: null }
+            }
+        ],
 
         interviewerNotes: {
             type: String,
