@@ -120,13 +120,45 @@ exports.loginAstrologer = async (req, res) => {
             });
         }
 
-        const isEmail = typeof identifier === "string" && identifier.includes("@");
-        const query = isEmail
-            ? { email: identifier.toLowerCase() }
-            : { $or: [{ phone: identifier }, { email: String(identifier).toLowerCase() }] };
+        const cleanIdentifier = String(identifier).trim();
+        const isEmail = cleanIdentifier.includes("@");
+        const lowerIdentifier = cleanIdentifier.toLowerCase();
 
-        // Find registered astrologer by email or phone
-        const astrologer = await Astrologer.findOne(query);
+        // Search query across email and phone
+        const query = isEmail
+            ? { email: lowerIdentifier }
+            : { $or: [{ phone: cleanPhone(cleanIdentifier) }, { phone: cleanIdentifier }, { email: lowerIdentifier }] };
+
+        function cleanPhone(val) {
+            return String(val).replace(/\D/g, "");
+        }
+
+        // 1. Find registered astrologer by email or phone
+        let astrologer = await Astrologer.findOne(query);
+
+        // Fallback: If not found by query, search by email regex or phone substring
+        if (!astrologer) {
+            astrologer = await Astrologer.findOne({
+                $or: [
+                    { email: { $regex: new RegExp(`^${lowerIdentifier}$`, "i") } },
+                    { phone: { $regex: new RegExp(cleanPhone(cleanIdentifier) + "$", "i") } }
+                ]
+            });
+        }
+
+        // 2. If still not found, check legacy AstrologerLogin model
+        if (!astrologer) {
+            const loginRec = await AstrologerLogin.findOne({ email: lowerIdentifier });
+            if (loginRec) {
+                astrologer = await Astrologer.findOne({
+                    $or: [{ astrologerLogin: loginRec._id }, { email: lowerIdentifier }]
+                });
+                if (astrologer && !astrologer.password) {
+                    astrologer.password = loginRec.password;
+                    await astrologer.save();
+                }
+            }
+        }
 
         if (!astrologer || !astrologer.password) {
             return res.status(401).json({
