@@ -422,6 +422,8 @@ exports.getApprovalStatus = async (req, res) => {
             success: true,
             status: astrologer.status,        // "pending" | "approved" | "rejected"
             isApproved: astrologer.status === "approved",
+            isOnline: Boolean(astrologer.isOnline),
+            isAvailable: Boolean(astrologer.isAvailable),
             interviewStatus: interview ? interview.status : "not_requested",
             date: null,
             time: null,

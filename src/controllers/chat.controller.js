@@ -330,7 +330,44 @@ exports.endChat = async (req, res, next) => {
             session.status = "COMPLETED";
             session.endTime = new Date();
             const durationMs = session.endTime.getTime() - new Date(session.startTime).getTime();
-            session.totalDurationMinutes = Math.max(1, Math.ceil(durationMs / 60000));
+            const durationMinutes = Math.max(1, Math.ceil(durationMs / 60000));
+            session.totalDurationMinutes = durationMinutes;
+
+            // Billing Reconciliation: Charge user and pay astrologer for final minutes
+            try {
+                const user = await User.findById(session.user);
+                const astrologer = await Astrologer.findById(session.astrologer);
+                
+                if (user && astrologer) {
+                    const rate = session.perMinuteRate || astrologer.consultationFee || 20;
+                    const expectedCost = durationMinutes * rate;
+                    const chargedSoFar = session.totalAmountDeducted || 0;
+                    const difference = expectedCost - chargedSoFar;
+                    
+                    if (difference > 0) {
+                        // Deduct remaining balance from user wallet
+                        const prevUserBalance = user.walletBalance || 0;
+                        user.walletBalance = Math.max(0, prevUserBalance - difference);
+                        
+                        // Add earnings to astrologer wallet
+                        const prevAstroBalance = astrologer.walletBalance || 0;
+                        astrologer.walletBalance = prevAstroBalance + difference;
+                        
+                        session.totalAmountDeducted = expectedCost;
+                        session.astrologerEarnings = expectedCost;
+                        
+                        await user.save();
+                        await astrologer.save();
+                        console.log(`💰 [Chat Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${difference}. Full cost: ₹${expectedCost}`);
+                    } else {
+                        session.totalAmountDeducted = Math.max(session.totalAmountDeducted || 0, expectedCost);
+                        session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedCost);
+                    }
+                }
+            } catch (billingErr) {
+                console.error("❌ Failed to reconcile chat billing on end:", billingErr);
+            }
+
             await session.save();
         }
 

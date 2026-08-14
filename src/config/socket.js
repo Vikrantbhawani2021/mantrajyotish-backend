@@ -120,6 +120,16 @@ const initSocket = (server) => {
                     return;
                 }
 
+                if (astroObj.status !== "approved") {
+                    socket.emit("error", { message: "Astrologer is not approved to take consultations yet." });
+                    return;
+                }
+
+                if (!astroObj.isOnline && !astroObj.isAvailable) {
+                    socket.emit("error", { message: "Astrologer is currently offline/unavailable." });
+                    return;
+                }
+
                 const perMinuteRate = astroObj.consultationFee || 0;
                 const minBalanceRequired = perMinuteRate * 2;
 

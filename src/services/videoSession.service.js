@@ -88,6 +88,14 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
     const astrologer = await findAstrologerByIdOrRef(astrologerId);
     if (!astrologer) throw new Error(`Astrologer not found for ID: ${astrologerId}`);
 
+    if (astrologer.status !== "approved") {
+        throw new Error("Astrologer is not approved to accept call consultations.");
+    }
+
+    if (!astrologer.isOnline && !astrologer.isAvailable) {
+        throw new Error("Astrologer is currently offline/unavailable for call consultations.");
+    }
+
     const perMinuteRate = astrologer.consultationFee || 0;
 
     // Ensure DB user wallet balance is healthy (at least ₹1000 or client balance)
@@ -100,46 +108,49 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
     const typeStr = String(callType).toUpperCase();
     const normalizedCallType = (typeStr === "AUDIO" || typeStr === "CALL" || typeStr === "VOICE" || typeStr === "PHONE") ? "AUDIO" : "VIDEO";
 
-    let session = await VideoSession.findOne({
-        user: user._id,
-        astrologer: astrologer._id,
-        status: { $in: ["PENDING", "ACTIVE", "live"] }
-    });
-
-    if (session) {
-        if (session.callType !== normalizedCallType) {
-            session.callType = normalizedCallType;
-            await session.save();
-        }
-    } else {
-        const roomId = generateRoomId(normalizedCallType === "AUDIO" ? "audio" : "video");
-        const channelName = roomId;
-
-        const sessionPayload = {
+    // Cancel/End any older pending/active/live call sessions for this user/astrologer so they don't block/reuse channels
+    await VideoSession.updateMany(
+        {
             user: user._id,
             astrologer: astrologer._id,
-            callType: normalizedCallType,
-            provider: "Agora",
-            roomId,
-            channelName,
-            perMinuteRate,
-            status: "PENDING"
-        };
-
-        try {
-            session = await VideoSession.create(sessionPayload);
-        } catch (createErr) {
-            if (createErr.code === 11000 || (createErr.message && createErr.message.includes("E11000"))) {
-                console.warn("Caught E11000 duplicate key error on VideoSession. Dropping legacy appointment_1 index and retrying...");
-                try {
-                    await VideoSession.collection.dropIndex("appointment_1");
-                } catch (dropErr) {
-                    console.warn("Could not drop appointment_1 index:", dropErr.message);
-                }
-                session = await VideoSession.create(sessionPayload);
-            } else {
-                throw createErr;
+            status: { $in: ["PENDING", "ACTIVE", "live"] }
+        },
+        {
+            $set: {
+                status: "COMPLETED",
+                endTime: new Date()
             }
+        }
+    );
+
+    const roomId = generateRoomId(normalizedCallType === "AUDIO" ? "audio" : "video");
+    const channelName = roomId;
+
+    const sessionPayload = {
+        user: user._id,
+        astrologer: astrologer._id,
+        callType: normalizedCallType,
+        provider: "Agora",
+        roomId,
+        channelName,
+        perMinuteRate,
+        status: "PENDING"
+    };
+
+    let session;
+    try {
+        session = await VideoSession.create(sessionPayload);
+    } catch (createErr) {
+        if (createErr.code === 11000 || (createErr.message && createErr.message.includes("E11000"))) {
+            console.warn("Caught E11000 duplicate key error on VideoSession. Dropping legacy appointment_1 index and retrying...");
+            try {
+                await VideoSession.collection.dropIndex("appointment_1");
+            } catch (dropErr) {
+                console.warn("Could not drop appointment_1 index:", dropErr.message);
+            }
+            session = await VideoSession.create(sessionPayload);
+        } else {
+            throw createErr;
         }
     }
 
@@ -225,8 +236,43 @@ const endCallSession = async (sessionId) => {
     session.endTime = endTime;
     session.totalDurationMinutes = durationMinutes;
     session.duration = durationMinutes;
-    await session.save();
 
+    // Billing Reconciliation: Charge user and pay astrologer for final minutes
+    try {
+        const user = await User.findById(session.user);
+        const astrologer = await Astrologer.findById(session.astrologer);
+        
+        if (user && astrologer) {
+            const rate = session.perMinuteRate || astrologer.consultationFee || 25;
+            const expectedCost = durationMinutes * rate;
+            const chargedSoFar = session.totalAmountDeducted || 0;
+            const difference = expectedCost - chargedSoFar;
+            
+            if (difference > 0) {
+                // Deduct remaining balance from user wallet
+                const prevUserBalance = user.walletBalance || 0;
+                user.walletBalance = Math.max(0, prevUserBalance - difference);
+                
+                // Add earnings to astrologer wallet
+                const prevAstroBalance = astrologer.walletBalance || 0;
+                astrologer.walletBalance = prevAstroBalance + difference;
+                
+                session.totalAmountDeducted = expectedCost;
+                session.astrologerEarnings = expectedCost;
+                
+                await user.save();
+                await astrologer.save();
+                console.log(`💰 [Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${difference}. Full cost: ₹${expectedCost}`);
+            } else {
+                session.totalAmountDeducted = Math.max(session.totalAmountDeducted || 0, expectedCost);
+                session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedCost);
+            }
+        }
+    } catch (billingErr) {
+        console.error("❌ Failed to reconcile call billing on end:", billingErr);
+    }
+
+    await session.save();
     return session;
 };
 

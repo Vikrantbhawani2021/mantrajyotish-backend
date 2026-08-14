@@ -394,9 +394,11 @@ const getPendingCallRequests = async (req, res) => {
         }
 
         const VideoSession = require("../models/videoSession.model");
+        const twoMinutesAgo = new Date(Date.now() - 2 * 60000); // 120 seconds limit
         const pendingSessions = await VideoSession.find({
             astrologer: { $in: astroIds },
-            status: "PENDING"
+            status: "PENDING",
+            createdAt: { $gte: twoMinutesAgo }
         }).sort({ createdAt: -1 }).populate("user", "firstname lastname phone profileImage dob tob pob name").lean();
 
         const formatted = pendingSessions.map(s => {

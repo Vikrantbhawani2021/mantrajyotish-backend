@@ -1,8 +1,17 @@
 const Astrologer = require("../models/astro.model");
 const AstroInterview = require("../models/astroInterview.model");
+const { getCache, setCache, deleteCache } = require("./redis.service");
+
+const CACHE_KEY_ONLINE = "online_astrologers";
+
+const clearOnlineAstrologersCache = async () => {
+    console.log("🧹 Invalidating online astrologers cache in Redis");
+    await deleteCache(CACHE_KEY_ONLINE);
+};
 
 const createAstrologer = async (data) => {
     const astrologer = await Astrologer.create(data);
+    await clearOnlineAstrologersCache();
     return await Astrologer.findById(astrologer._id)
         .populate("user")
         .populate("astrologerLogin");
@@ -18,7 +27,7 @@ const getAllAstrologers = async (filter = {}) => {
     }
 
     const astrologers = await Astrologer.find(query)
-        .sort({ createdAt: -1 })
+        .sort({ isOnline: -1, isAvailable: -1, rating: -1, totalConsultations: -1, createdAt: -1 })
         .populate("user")
         .populate("astrologerLogin")
         .lean();
@@ -66,6 +75,16 @@ const getPendingAstrologers = async () => {
 };
 
 const getOnlineAstrologers = async () => {
+    const cachedData = await getCache(CACHE_KEY_ONLINE);
+    if (cachedData) {
+        try {
+            console.log("💾 Returning cached online astrologers from Redis");
+            return JSON.parse(cachedData);
+        } catch (e) {
+            console.error("Failed to parse cached online astrologers JSON:", e.message);
+        }
+    }
+
     const astrologers = await Astrologer.find({
         status: "approved",
         $or: [
@@ -85,10 +104,15 @@ const getOnlineAstrologers = async () => {
         interviewMap[String(iv.astrologer)] = iv;
     }
 
-    return astrologers.map(astro => ({
+    const result = astrologers.map(astro => ({
         ...astro,
         interview: interviewMap[String(astro._id)] || null
     }));
+
+    // Cache the online list for 5 minutes (300 seconds)
+    await setCache(CACHE_KEY_ONLINE, JSON.stringify(result), 300);
+
+    return result;
 };
 
 const getAstrologerById = async (id) => {
@@ -103,7 +127,7 @@ const getAstrologerById = async (id) => {
 };
 
 const approveAstrologer = async (id) => {
-    return await Astrologer.findByIdAndUpdate(
+    const updated = await Astrologer.findByIdAndUpdate(
         id,
         {
             $set: {
@@ -115,10 +139,12 @@ const approveAstrologer = async (id) => {
     )
     .populate("user")
     .populate("astrologerLogin");
+    await clearOnlineAstrologersCache();
+    return updated;
 };
 
 const rejectAstrologer = async (id) => {
-    return await Astrologer.findByIdAndUpdate(
+    const updated = await Astrologer.findByIdAndUpdate(
         id,
         {
             $set: {
@@ -131,6 +157,8 @@ const rejectAstrologer = async (id) => {
     )
     .populate("user")
     .populate("astrologerLogin");
+    await clearOnlineAstrologersCache();
+    return updated;
 };
 
 const toggleOnlineStatus = async (id, isOnline, isAvailable) => {
@@ -138,17 +166,19 @@ const toggleOnlineStatus = async (id, isOnline, isAvailable) => {
     if (isOnline !== undefined) updateData.isOnline = Boolean(isOnline);
     if (isAvailable !== undefined) updateData.isAvailable = Boolean(isAvailable);
 
-    return await Astrologer.findByIdAndUpdate(
+    const updated = await Astrologer.findByIdAndUpdate(
         id,
         { $set: updateData },
         { returnDocument: 'after' }
     )
     .populate("user")
     .populate("astrologerLogin");
+    await clearOnlineAstrologersCache();
+    return updated;
 };
 
 const updateAstrologer = async (id, data) => {
-    return await Astrologer.findByIdAndUpdate(
+    const updated = await Astrologer.findByIdAndUpdate(
         id,
         data,
         {
@@ -156,10 +186,14 @@ const updateAstrologer = async (id, data) => {
             runValidators: true
         }
     ).populate("user").populate("astrologerLogin");
+    await clearOnlineAstrologersCache();
+    return updated;
 };
 
 const deleteAstrologer = async (id) => {
-    return await Astrologer.findByIdAndDelete(id);
+    const deleted = await Astrologer.findByIdAndDelete(id);
+    await clearOnlineAstrologersCache();
+    return deleted;
 };
 
 module.exports = {

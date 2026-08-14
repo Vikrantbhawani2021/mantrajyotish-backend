@@ -23,8 +23,8 @@ router.post("/reject", authMiddleware, adminMiddleware, astroController.rejectAs
 router.put("/reject", authMiddleware, adminMiddleware, astroController.rejectAstrologer);
 
 // Online/Offline Status Toggle
-router.put("/toggle-online", astroController.toggleOnlineStatus);
-router.put("/toggle-online/:id", astroController.toggleOnlineStatus);
+router.put("/toggle-online", authMiddleware, astroController.toggleOnlineStatus);
+router.put("/toggle-online/:id", authMiddleware, astroController.toggleOnlineStatus);
 
 // Details by ID
 router.get("/:id", astroController.getAstrologerById);

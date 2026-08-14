@@ -10,6 +10,7 @@ const http = require("http");
 const app = require("./src/app");
 const connectDB = require("./src/config/db");
 const { initSocket } = require("./src/config/socket");
+const { initRedis } = require("./src/config/redis");
 
 const PORT = process.env.PORT || 3000;
 
@@ -18,6 +19,9 @@ initSocket(server);
 
 const startServer = async () => {
     try {
+        // Initialize Redis Connection
+        await initRedis();
+
         server.listen(PORT, () => {
             console.log(`🚀 Server Running on Port ${PORT} with Socket.io Enabled`);
         });

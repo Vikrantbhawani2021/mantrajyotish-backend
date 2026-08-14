@@ -76,7 +76,30 @@ const normalizeAstroData = async (req) => {
     if (body.toolsTechniques !== undefined && body.toolsTechniques !== null) payload.toolsTechniques = body.toolsTechniques;
     if (body.achievements !== undefined && body.achievements !== null) payload.achievements = body.achievements;
     if (body.certificateName !== undefined && body.certificateName !== null) payload.certificateName = body.certificateName;
-    if (body.consultationFee !== undefined && body.consultationFee !== null) payload.consultationFee = body.consultationFee;
+    // Extract consultation fee supporting common synonyms
+    const feeValue = body.consultationFee !== undefined ? body.consultationFee :
+                     body.consultationRate !== undefined ? body.consultationRate :
+                     body.consultationCharge !== undefined ? body.consultationCharge :
+                     body.perMinuteRate !== undefined ? body.perMinuteRate :
+                     body.rate !== undefined ? body.rate :
+                     body.fee !== undefined ? body.fee :
+                     body.charge !== undefined ? body.charge :
+                     body.price !== undefined ? body.price :
+                     body.callRate !== undefined ? body.callRate :
+                     body.chatRate !== undefined ? body.chatRate :
+                     body.videoRate !== undefined ? body.videoRate :
+                     undefined;
+
+    if (feeValue !== undefined && feeValue !== null) {
+        // Strip out non-numeric characters (e.g. "15/min" -> 15)
+        const parsedFee = typeof feeValue === "string" 
+            ? Number(feeValue.replace(/[^0-9.]/g, "")) 
+            : Number(feeValue);
+        
+        if (!isNaN(parsedFee)) {
+            payload.consultationFee = parsedFee;
+        }
+    }
 
     if (body.isOnline !== undefined && body.isOnline !== null) payload.isOnline = Boolean(body.isOnline);
     if (body.isAvailable !== undefined && body.isAvailable !== null) payload.isAvailable = Boolean(body.isAvailable);
@@ -290,22 +313,26 @@ const toggleOnlineStatus = async (req, res, next) => {
             if (astroByEmail) astrologerId = astroByEmail._id;
         }
 
-        // If logged in via JWT
+        // If logged in via JWT, try matching _id directly, then astrologerLogin, then email
         if (!astrologerId && req.user) {
-            const astro = await Astrologer.findOne({ astrologerLogin: req.user.userId });
-            if (astro) astrologerId = astro._id;
+            const astroById = await Astrologer.findById(req.user.userId);
+            if (astroById) {
+                astrologerId = astroById._id;
+            } else {
+                const astro = await Astrologer.findOne({
+                    $or: [
+                        { astrologerLogin: req.user.userId },
+                        { email: String(req.user.email || "").toLowerCase() }
+                    ]
+                });
+                if (astro) astrologerId = astro._id;
+            }
         }
 
-        // Fallback: latest astrologer if no ID/email provided
         if (!astrologerId) {
-            const lastAstro = await Astrologer.findOne().sort({ createdAt: -1 });
-            if (lastAstro) astrologerId = lastAstro._id;
-        }
-
-        if (!astrologerId) {
-            return res.status(404).json({
+            return res.status(400).json({
                 success: false,
-                message: "Astrologer not found"
+                message: "Unable to identify the astrologer. Please provide an astrologer ID or authentication token."
             });
         }
 
@@ -314,6 +341,13 @@ const toggleOnlineStatus = async (req, res, next) => {
             return res.status(404).json({
                 success: false,
                 message: "Astrologer not found"
+            });
+        }
+
+        if (currentAstro.status !== "approved") {
+            return res.status(403).json({
+                success: false,
+                message: "Only approved astrologers can set their status to online or available. Your status is: " + currentAstro.status
             });
         }
 
