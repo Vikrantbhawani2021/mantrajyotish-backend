@@ -31,4 +31,7 @@ router.delete(
     paymentController.deletePayment
 );
 
+// Lookup payment by transaction id (pay_... or order_...)
+router.get("/transaction/:id", authMiddleware, paymentController.getPaymentByTransactionId);
+
 module.exports = router;

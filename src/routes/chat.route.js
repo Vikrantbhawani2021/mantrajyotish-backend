@@ -14,6 +14,7 @@ router.post("/message", chatController.sendMessage);
 // Chat History & Listing APIs
 router.get("/history/:sessionId", chatController.getChatHistory);
 router.get("/sessions", chatController.getMySessions);
+router.get("/details/:sessionId", chatController.getSessionDetails);
 
 // Rating & Review API
 router.post("/rate", chatController.rateChat);

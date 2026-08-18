@@ -107,6 +107,16 @@ exports.initiateChat = async (req, res, next) => {
             await user.save().catch(() => null);
         }
 
+        const formatDate = (dateVal) => {
+            if (!dateVal) return "Not Specified";
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return String(dateVal);
+            const day = String(d.getDate()).padStart(2, "0");
+            const month = String(d.getMonth() + 1).padStart(2, "0");
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+        };
+
         const userDetails = {
             _id: user._id,
             id: user._id,
@@ -116,9 +126,9 @@ exports.initiateChat = async (req, res, next) => {
             phone: user.phone || "",
             email: user.email || "",
             profileImage: user.profileImage || user.avatar || "",
-            dob: user.dob || "Not Specified",
-            tob: user.tob || "Not Specified",
-            pob: user.pob || "Not Specified",
+            dob: user.dateofbirth ? formatDate(user.dateofbirth) : (user.dob || "Not Specified"),
+            tob: user.timeofbirth || user.tob || "Not Specified",
+            pob: user.placeofbirth || user.pob || "Not Specified",
             gender: user.gender || "Not Specified"
         };
 
@@ -617,6 +627,46 @@ exports.rateChat = async (req, res, next) => {
             success: true,
             message: "Chat rating and review submitted successfully.",
             data: session
+        });
+
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * 8. Get Chat Session Details by Session ID
+ */
+exports.getSessionDetails = async (req, res, next) => {
+    try {
+        const sessionId = getSessionIdFromBodyOrParams(req);
+
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                message: "sessionId is required."
+            });
+        }
+
+        const session = await ChatSession.findById(sessionId)
+            .populate("user", "firstname lastname email phone profileImage")
+            .populate("astrologer", "name profileImage consultationFee rating");
+
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                message: "Chat session not found."
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                ...session.toObject(),
+                sessionId: session._id,
+                chatId: session._id,
+                id: session._id
+            }
         });
 
     } catch (error) {

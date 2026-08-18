@@ -33,6 +33,12 @@ const verifyPaymentSignature = ({ order_id, payment_id, signature }) => {
     return generated_signature === signature;
 };
 
+const fetchPayment = async (payment_id) => {
+    if (!payment_id) throw new Error('payment_id is required');
+    const payment = await instance.payments.fetch(payment_id);
+    return payment;
+};
+
 const verifyWebhookSignature = ({ payload, signature }) => {
     const generated = crypto.createHmac('sha256', config.razorpay.keySecret)
         .update(payload)
@@ -44,5 +50,6 @@ const verifyWebhookSignature = ({ payload, signature }) => {
 module.exports = {
     createOrder,
     verifyPaymentSignature,
-    verifyWebhookSignature
+    verifyWebhookSignature,
+    fetchPayment
 };

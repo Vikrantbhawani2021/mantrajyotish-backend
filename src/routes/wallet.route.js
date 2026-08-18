@@ -72,14 +72,30 @@ router.get("/balance", async (req, res) => {
         }
 
         let user = await findUserByIdentifier(identifier, phoneFallback);
+        let astrologer = null;
 
-        if (!user) {
+        if (!user && identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+            const Astrologer = require("../models/astro.model");
+            astrologer = await Astrologer.findById(identifier);
+        }
+
+        if (!user && !astrologer) {
             // Return 200 with 0 balance for guest users instead of breaking front-end
             return res.status(200).json({
                 success: true,
                 data: {
                     walletBalance: 0,
                     name: "Guest User"
+                }
+            });
+        }
+
+        if (astrologer) {
+            return res.status(200).json({
+                success: true,
+                data: {
+                    walletBalance: astrologer.walletBalance || 0,
+                    name: astrologer.name || "Astrologer"
                 }
             });
         }
@@ -170,7 +186,7 @@ router.post("/add", async (req, res) => {
 
 /**
  * GET /api/wallet/transactions
- * Returns transaction history for user
+ * Returns transaction history for user or astrologer
  */
 router.get("/transactions", async (req, res) => {
     try {
@@ -188,63 +204,167 @@ router.get("/transactions", async (req, res) => {
         if (!identifier) identifier = req.query.userId || req.query.phone;
         const phoneFallback = req.query.phone || null;
 
-        const user = await findUserByIdentifier(identifier, phoneFallback);
+        let user = await findUserByIdentifier(identifier, phoneFallback);
+        let astrologer = null;
 
-        if (!user) {
+        if (!user && identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+            const Astrologer = require("../models/astro.model");
+            astrologer = await Astrologer.findById(identifier);
+        }
+
+        if (!user && !astrologer) {
             return res.status(200).json({ success: true, count: 0, data: [] });
         }
 
         const VideoSession = require("../models/videoSession.model");
         const ChatSession = require("../models/chatSession.model");
-
-        const [callSessions, chatSessions] = await Promise.all([
-            VideoSession.find({ user: user._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
-                .sort({ updatedAt: -1 })
-                .limit(20)
-                .populate("astrologer", "name")
-                .lean(),
-            ChatSession.find({ user: user._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
-                .sort({ updatedAt: -1 })
-                .limit(20)
-                .populate("astrologer", "name")
-                .lean()
-        ]);
+        const Payment = require("../models/payment.model");
 
         const txns = [];
 
-        callSessions.forEach(s => {
-            if (s.totalAmountDeducted > 0) {
-                txns.push({
-                    id: String(s._id),
-                    title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${s.astrologer?.name || "Astrologer"}`,
-                    date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                    amount: `- ₹${(s.totalAmountDeducted || 0).toFixed(2)}`,
-                    amountClass: "text-gray-800",
-                    status: "Completed",
-                    statusClass: "text-gray-400",
-                    iconBg: "bg-pink-50 text-pink-500",
-                    iconType: s.callType === "VIDEO" ? "video" : "phone",
-                    type: "debit"
-                });
-            }
-        });
+        if (astrologer) {
+            const [callSessions, chatSessions] = await Promise.all([
+                VideoSession.find({ astrologer: astrologer._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
+                    .sort({ updatedAt: -1 })
+                    .limit(20)
+                    .populate("user", "name firstname lastname phone")
+                    .lean(),
+                ChatSession.find({ astrologer: astrologer._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
+                    .sort({ updatedAt: -1 })
+                    .limit(20)
+                    .populate("user", "name firstname lastname phone")
+                    .lean()
+            ]);
 
-        chatSessions.forEach(s => {
-            if (s.totalAmountDeducted > 0) {
-                txns.push({
-                    id: String(s._id),
-                    title: `Chat with ${s.astrologer?.name || "Astrologer"}`,
-                    date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                    amount: `- ₹${(s.totalAmountDeducted || 0).toFixed(2)}`,
-                    amountClass: "text-gray-800",
-                    status: "Completed",
-                    statusClass: "text-gray-400",
-                    iconBg: "bg-pink-50 text-pink-500",
-                    iconType: "message",
-                    type: "debit"
+            callSessions.forEach(s => {
+                if (s.astrologerEarnings > 0) {
+                    const clientName = s.user?.name || `${s.user?.firstname || ""} ${s.user?.lastname || ""}`.trim() || s.user?.phone || "Client";
+                    txns.push({
+                        id: String(s._id),
+                        title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
+                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                        amount: `+ ₹${(s.astrologerEarnings || 0).toFixed(2)}`,
+                        amountClass: "text-green-600",
+                        status: "Earned",
+                        statusClass: "text-green-500",
+                        iconBg: "bg-green-50 text-green-500",
+                        iconType: s.callType === "VIDEO" ? "video" : "phone",
+                        type: "credit"
+                    });
+                }
+            });
+
+            chatSessions.forEach(s => {
+                if (s.astrologerEarnings > 0) {
+                    const clientName = s.user?.name || `${s.user?.firstname || ""} ${s.user?.lastname || ""}`.trim() || s.user?.phone || "Client";
+                    txns.push({
+                        id: String(s._id),
+                        title: `Chat with ${clientName}`,
+                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                        amount: `+ ₹${(s.astrologerEarnings || 0).toFixed(2)}`,
+                        amountClass: "text-green-600",
+                        status: "Earned",
+                        statusClass: "text-green-500",
+                        iconBg: "bg-green-50 text-green-500",
+                        iconType: "message",
+                        type: "credit"
+                    });
+                }
+            });
+        } else {
+            const [callSessions, chatSessions] = await Promise.all([
+                VideoSession.find({ user: user._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
+                    .sort({ updatedAt: -1 })
+                    .limit(20)
+                    .populate("astrologer", "name")
+                    .lean(),
+                ChatSession.find({ user: user._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
+                    .sort({ updatedAt: -1 })
+                    .limit(20)
+                    .populate("astrologer", "name")
+                    .lean()
+            ]);
+
+            callSessions.forEach(s => {
+                if (s.totalAmountDeducted > 0) {
+                    txns.push({
+                        id: String(s._id),
+                        title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${s.astrologer?.name || "Astrologer"}`,
+                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                        amount: `- ₹${(s.totalAmountDeducted || 0).toFixed(2)}`,
+                        amountClass: "text-gray-800",
+                        status: "Completed",
+                        statusClass: "text-gray-400",
+                        iconBg: "bg-pink-50 text-pink-500",
+                        iconType: s.callType === "VIDEO" ? "video" : "phone",
+                        type: "debit"
+                    });
+                }
+            });
+
+            chatSessions.forEach(s => {
+                if (s.totalAmountDeducted > 0) {
+                    txns.push({
+                        id: String(s._id),
+                        title: `Chat with ${s.astrologer?.name || "Astrologer"}`,
+                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                        amount: `- ₹${(s.totalAmountDeducted || 0).toFixed(2)}`,
+                        amountClass: "text-gray-800",
+                        status: "Completed",
+                        statusClass: "text-gray-400",
+                        iconBg: "bg-pink-50 text-pink-500",
+                        iconType: "message",
+                        type: "debit"
+                    });
+                }
+            });
+
+            // Include Payment (top-up) records as credit transactions
+            try {
+                const payments = await Payment.find({ user: user._id }).sort({ createdAt: -1 }).limit(20).lean();
+                payments.forEach(p => {
+                    if (p.paymentStatus === "success") {
+                        txns.push({
+                            id: String(p._id),
+                            title: p.appointment ? `Payment for appointment` : `Added Money`,
+                            date: new Date(p.paidAt || p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                            amount: `+ ₹${(p.amount || 0).toFixed(2)}`,
+                            amountClass: "text-green-600",
+                            status: "Success",
+                            statusClass: "text-green-500",
+                            iconBg: "bg-green-50 text-green-500",
+                            iconType: "wallet",
+                            type: "credit",
+                            meta: {
+                                paymentGateway: p.paymentGateway,
+                                transactionId: p.transactionId,
+                                orderId: p.orderId
+                            }
+                        });
+                    } else if (p.paymentStatus === "failed") {
+                        txns.push({
+                            id: String(p._id),
+                            title: `Failed Payment`,
+                            date: new Date(p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                            amount: `- ₹${(p.amount || 0).toFixed(2)}`,
+                            amountClass: "text-gray-800",
+                            status: "Failed",
+                            statusClass: "text-red-500",
+                            iconBg: "bg-gray-50 text-gray-400",
+                            iconType: "alert",
+                            type: "failed",
+                            meta: {
+                                paymentGateway: p.paymentGateway,
+                                transactionId: p.transactionId,
+                                orderId: p.orderId
+                            }
+                        });
+                    }
                 });
+            } catch (e) {
+                console.warn("Could not load payments for transactions view:", e.message);
             }
-        });
+        }
 
         txns.sort((a, b) => new Date(b.date) - new Date(a.date));
 

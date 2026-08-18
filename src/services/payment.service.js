@@ -42,6 +42,14 @@ const getPaymentById = async (id) => {
         .populate("appointment");
 };
 
+const getPaymentByTransactionId = async (txId) => {
+    return await Payment.findOne({
+        $or: [ { transactionId: txId }, { orderId: txId }, { _id: txId } ]
+    })
+    .populate("user")
+    .populate("appointment");
+};
+
 const updatePayment = async (id, updateData) => {
 
     const payment = await Payment.findByIdAndUpdate(
@@ -76,6 +84,7 @@ module.exports = {
     createPayment,
     getAllPayments,
     getPaymentById,
+    getPaymentByTransactionId,
     updatePayment,
     deletePayment
 };

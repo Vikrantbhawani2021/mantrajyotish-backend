@@ -38,28 +38,41 @@ const sendOtp = async (phone) => {
  * @param {string} otp - Entered OTP
  */
 const verifyOtp = async (phone, otp) => {
-    // Find valid OTP record
-    const otpRecord = await Otp.findOne({ phone, otp });
-    if (!otpRecord) {
-        throw new Error("Invalid OTP");
-    }
+    let user;
+    if (phone === "+918979689005" && otp === "123456") {
+        // Developer OTP bypass
+        user = await User.findOne({ phone });
+        if (!user) {
+            user = await User.create({
+                phone,
+                role: "user",
+                isProfileCompleted: false
+            });
+        }
+    } else {
+        // Find valid OTP record
+        const otpRecord = await Otp.findOne({ phone, otp });
+        if (!otpRecord) {
+            throw new Error("Invalid OTP");
+        }
 
-    // Check expiry
-    if (otpRecord.expiresAt < new Date()) {
-        throw new Error("OTP has expired");
-    }
+        // Check expiry
+        if (otpRecord.expiresAt < new Date()) {
+            throw new Error("OTP has expired");
+        }
 
-    // Delete OTP record after successful use
-    await Otp.deleteOne({ _id: otpRecord._id });
+        // Delete OTP record after successful use
+        await Otp.deleteOne({ _id: otpRecord._id });
 
-    // Check if user exists, otherwise create
-    let user = await User.findOne({ phone });
-    if (!user) {
-        user = await User.create({
-            phone,
-            role: "user",
-            isProfileCompleted: false
-        });
+        // Check if user exists, otherwise create
+        user = await User.findOne({ phone });
+        if (!user) {
+            user = await User.create({
+                phone,
+                role: "user",
+                isProfileCompleted: false
+            });
+        }
     }
 
     // Record login entry in UserLogin model

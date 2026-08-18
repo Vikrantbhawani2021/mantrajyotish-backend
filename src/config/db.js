@@ -35,6 +35,19 @@ const connectDB = async () => {
                 console.warn("VideoSessions index drop warning:", vErr.message);
             }
 
+            // Clean up legacy unique appointment_1 index from payments collection
+            try {
+                const paymentsCol = mongoose.connection.collection("payments");
+                const paymentIndexes = await paymentsCol.indexes();
+                const apptIdx = paymentIndexes.find(idx => idx.name === "appointment_1");
+                if (apptIdx) {
+                    await paymentsCol.dropIndex("appointment_1");
+                    console.log("Successfully dropped legacy unique appointment_1 index from payments");
+                }
+            } catch (pErr) {
+                console.warn("Payments index drop warning:", pErr.message);
+            }
+
             // Sync User indexes
             const User = require("../models/user.model");
             await User.syncIndexes();

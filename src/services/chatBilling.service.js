@@ -53,9 +53,11 @@ const startBillingTimer = (sessionId, io) => {
 
             // Notify room with updated tick details
             if (io) {
+                const elapsedSeconds = session.startTime ? Math.floor((Date.now() - new Date(session.startTime).getTime()) / 1000) : (session.totalDurationMinutes * 60);
                 io.to(`session_${sessionId}`).emit("timer_tick", {
                     sessionId,
                     elapsedMinutes: session.totalDurationMinutes,
+                    elapsedSeconds,
                     remainingBalance: user.walletBalance,
                     totalDeducted: session.totalAmountDeducted
                 });

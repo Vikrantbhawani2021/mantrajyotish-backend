@@ -63,6 +63,16 @@ const requestCall = async (req, res) => {
                 `${sessionUserObj.firstname || ""} ${sessionUserObj.lastname || ""}`.trim() ||
                 (sessionUserObj.phone ? `User (${sessionUserObj.phone})` : "Client User");
 
+            const formatDate = (dateVal) => {
+            if (!dateVal) return "Not Specified";
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return String(dateVal);
+            const day = String(d.getDate()).padStart(2, "0");
+            const month = String(d.getMonth() + 1).padStart(2, "0");
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+        };
+
             const flatUser = {
                 _id: sessionUserObj._id || sessionUserObj.id || userId,
                 id: sessionUserObj._id || sessionUserObj.id || userId,
@@ -72,9 +82,9 @@ const requestCall = async (req, res) => {
                 phone: sessionUserObj.phone || "",
                 avatar: sessionUserObj.profileImage || sessionUserObj.avatar || "",
                 profileImage: sessionUserObj.profileImage || sessionUserObj.avatar || "",
-                dob: sessionUserObj.dob || "Not Specified",
-                tob: sessionUserObj.tob || "Not Specified",
-                pob: sessionUserObj.pob || "Not Specified",
+                dob: sessionUserObj.dateofbirth ? formatDate(sessionUserObj.dateofbirth) : (sessionUserObj.dob || "Not Specified"),
+                tob: sessionUserObj.timeofbirth || sessionUserObj.tob || "Not Specified",
+                pob: sessionUserObj.placeofbirth || sessionUserObj.pob || "Not Specified",
             };
 
             const payload = {
@@ -399,7 +409,7 @@ const getPendingCallRequests = async (req, res) => {
             astrologer: { $in: astroIds },
             status: "PENDING",
             createdAt: { $gte: twoMinutesAgo }
-        }).sort({ createdAt: -1 }).populate("user", "firstname lastname phone profileImage dob tob pob name").lean();
+        }).sort({ createdAt: -1 }).populate("user", "firstname lastname phone profileImage dateofbirth timeofbirth placeofbirth name").lean();
 
         const formatted = pendingSessions.map(s => {
             const userObj = s.user || {};
@@ -417,9 +427,9 @@ const getPendingCallRequests = async (req, res) => {
                     phone: userObj.phone || "",
                     avatar: userObj.profileImage || "",
                     profileImage: userObj.profileImage || "",
-                    dob: userObj.dob || "Not Specified",
-                    tob: userObj.tob || "Not Specified",
-                    pob: userObj.pob || "Not Specified",
+                    dob: userObj.dateofbirth ? formatDate(userObj.dateofbirth) : (userObj.dob || "Not Specified"),
+                    tob: userObj.timeofbirth || userObj.tob || "Not Specified",
+                    pob: userObj.placeofbirth || userObj.pob || "Not Specified",
                 },
                 astrologer: s.astrologer,
                 perMinuteRate: s.perMinuteRate,
