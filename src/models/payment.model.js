@@ -11,8 +11,7 @@ const PaymentSchema = new mongoose.Schema(
     appointment: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Appointment",
-        required: true,
-        unique: true
+        required: false
     },
 
     amount: {

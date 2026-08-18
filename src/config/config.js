@@ -28,6 +28,10 @@ module.exports = {
     fast2sms: {
         apiKey: process.env.FAST2SMS_API_KEY,
     },
+    razorpay: {
+        keyId: process.env.RAZORPAY_KEY_ID,
+        keySecret: process.env.RAZORPAY_KEY_SECRET
+    },
     email: {
         smtp: {
             host: process.env.SMTP_HOST || "smtp.gmail.com",
