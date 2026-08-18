@@ -103,21 +103,77 @@ const verifyPayment = async (req, res) => {
             payment = await Payment.findOne({ transactionId: razorpay_payment_id });
         }
 
-        if (payment) {
+        // Helper: resolve user identifier from Authorization header or body
+        const resolveIdentifierFromRequest = () => {
+            if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+                try {
+                    const { verifyToken } = require("../utils/jwt");
+                    const decoded = verifyToken(req.headers.authorization.split(" ")[1]);
+                    return decoded.userId || decoded.id || decoded._id || decoded.phone || null;
+                } catch (e) {
+                    return null;
+                }
+            }
+            return req.body.userId || req.body.user_id || req.body.phone || req.body.id || null;
+        };
+
+        const identifier = resolveIdentifierFromRequest();
+        const phoneFallback = req.body.phone || null;
+
+        if (!payment) {
+            // If no payment record exists, create one (capture case where client didn't create a payment record)
+            const newPaymentData = {
+                amount: amount ? Number(amount) : 0,
+                currency: req.body.currency || "INR",
+                paymentGateway: "Razorpay",
+                paymentStatus: "success",
+                orderId: razorpay_order_id,
+                transactionId: razorpay_payment_id,
+                paidAt: new Date()
+            };
+
+            // attach user if we can resolve
+            if (identifier) {
+                const resolvedUser = await findUserByIdentifier(identifier, phoneFallback);
+                if (resolvedUser) newPaymentData.user = resolvedUser._id;
+            }
+
+            try {
+                payment = await Payment.create(newPaymentData);
+            } catch (e) {
+                console.warn("Could not create payment record on verify:", e.message);
+            }
+        } else {
             payment.paymentStatus = "success";
             payment.transactionId = razorpay_payment_id;
             payment.paidAt = new Date();
-            await payment.save();
+            // If payment has no user but request provides identifier, attach user
+            if (!payment.user && identifier) {
+                try {
+                    const resolvedUser = await findUserByIdentifier(identifier, phoneFallback);
+                    if (resolvedUser) {
+                        payment.user = resolvedUser._id;
+                    }
+                } catch (e) {
+                    console.warn("Could not resolve user for payment:", e.message);
+                }
+            }
 
-            // If this payment is for an appointment, mark appointment as paid/confirmed
+            await payment.save();
+        }
+
+        // Now perform follow-up actions (appointment update or wallet credit)
+        if (payment) {
             if (payment.appointment) {
                 try {
                     await Appointment.findByIdAndUpdate(payment.appointment, { appointmentStatus: "confirmed", paymentStatus: "paid" });
                 } catch (e) {
                     console.warn("Could not update appointment status:", e.message);
                 }
-            } else if (payment.user) {
-                // Wallet top-up flow: credit user's wallet
+            }
+
+            // Wallet top-up flow: credit user's wallet if payment.user present
+            if (payment.user) {
                 try {
                     const user = await User.findById(payment.user);
                     if (user) {
