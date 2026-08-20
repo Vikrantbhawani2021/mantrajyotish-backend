@@ -393,6 +393,28 @@ exports.endChat = async (req, res, next) => {
                     _id: session._id
                 };
                 io.to(`session_${sessionId}`).emit("chat_ended", payload);
+
+                // Safely broadcast to individual user and astrologer personal rooms
+                const rawUser = session.user;
+                const userId = (rawUser && typeof rawUser === "object")
+                    ? String(rawUser._id || rawUser.id || "")
+                    : String(rawUser || "");
+
+                const rawAstro = session.astrologer;
+                const astroId = (rawAstro && typeof rawAstro === "object")
+                    ? String(rawAstro._id || rawAstro.id || "")
+                    : String(rawAstro || "");
+
+                if (userId) {
+                    io.to(`user_${userId}`).emit("chat_ended", payload);
+                    io.to(userId).emit("chat_ended", payload);
+                }
+                if (astroId) {
+                    io.to(`user_${astroId}`).emit("chat_ended", payload);
+                    io.to(`astro_${astroId}`).emit("chat_ended", payload);
+                    io.to(`astrologer_${astroId}`).emit("chat_ended", payload);
+                    io.to(astroId).emit("chat_ended", payload);
+                }
             }
         } catch (e) {}
 

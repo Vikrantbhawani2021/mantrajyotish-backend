@@ -44,12 +44,36 @@ const findUserByIdentifier = async (identifier, phoneFallback = null) => {
 };
 
 /**
+ * Calculates astrologer stats: total earnings and pending payouts
+ */
+const calculateAstrologerStats = async (astrologerId) => {
+    const VideoSession = require("../models/videoSession.model");
+    const ChatSession = require("../models/chatSession.model");
+    const Payout = require("../models/payout.model");
+
+    const [calls, chats, payouts] = await Promise.all([
+        VideoSession.find({ astrologer: astrologerId, status: "COMPLETED" }),
+        ChatSession.find({ astrologer: astrologerId, status: "COMPLETED" }),
+        Payout.find({ astrologer: astrologerId, status: "Pending" })
+    ]);
+
+    const callEarnings = calls.reduce((sum, s) => sum + (s.astrologerEarnings || 0), 0);
+    const chatEarnings = chats.reduce((sum, s) => sum + (s.astrologerEarnings || 0), 0);
+    const totalEarnings = callEarnings + chatEarnings;
+
+    const pendingPayout = payouts.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    return { totalEarnings, pendingPayout };
+};
+
+/**
  * GET /api/wallet/balance
  * Returns current wallet balance.
  */
 router.get("/balance", async (req, res) => {
     try {
         let identifier = null;
+        let role = null;
 
         // Check JWT token
         const authHeader = req.headers.authorization;
@@ -58,11 +82,16 @@ router.get("/balance", async (req, res) => {
                 const { verifyToken } = require("../utils/jwt");
                 const decoded = verifyToken(authHeader.split(" ")[1]);
                 identifier = decoded.userId || decoded.id || decoded._id || decoded.phone;
+                role = decoded.role;
             } catch (err) {}
         }
 
         if (!identifier) {
             identifier = req.query.userId || req.query.user_id || req.query.phone || req.query.id;
+        }
+
+        if (!role) {
+            role = req.query.role || null;
         }
 
         const phoneFallback = req.query.phone || null;
@@ -71,12 +100,32 @@ router.get("/balance", async (req, res) => {
             return res.status(400).json({ success: false, message: "User ID or phone number is required" });
         }
 
-        let user = await findUserByIdentifier(identifier, phoneFallback);
+        let user = null;
         let astrologer = null;
 
-        if (!user && identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+        if (role === "astrologer") {
             const Astrologer = require("../models/astro.model");
-            astrologer = await Astrologer.findById(identifier);
+            if (identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+                astrologer = await Astrologer.findById(identifier);
+            }
+            if (!astrologer && identifier) {
+                astrologer = await Astrologer.findOne({
+                    $or: [
+                        { email: identifier },
+                        { phone: identifier },
+                        { name: identifier }
+                    ]
+                });
+            }
+            if (!astrologer && phoneFallback) {
+                astrologer = await Astrologer.findOne({ phone: phoneFallback });
+            }
+        } else {
+            user = await findUserByIdentifier(identifier, phoneFallback);
+            if (!user && identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+                const Astrologer = require("../models/astro.model");
+                astrologer = await Astrologer.findById(identifier);
+            }
         }
 
         if (!user && !astrologer) {
@@ -91,11 +140,14 @@ router.get("/balance", async (req, res) => {
         }
 
         if (astrologer) {
+            const { totalEarnings, pendingPayout } = await calculateAstrologerStats(astrologer._id);
             return res.status(200).json({
                 success: true,
                 data: {
                     walletBalance: astrologer.walletBalance || 0,
-                    name: astrologer.name || "Astrologer"
+                    name: astrologer.name || "Astrologer",
+                    totalEarnings,
+                    pendingPayout
                 }
             });
         }
@@ -185,12 +237,120 @@ router.post("/add", async (req, res) => {
 });
 
 /**
+ * POST /api/wallet/withdraw
+ * Astrologer requests withdrawal of funds.
+ * Body: { amount: Number, payoutMethod: 'upi'|'bank', upiId?: String, accountNumber?: String, ifscCode?: String, accountHolder?: String }
+ */
+router.post("/withdraw", async (req, res) => {
+    try {
+        let identifier = null;
+        let role = null;
+
+        // Check JWT token
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            try {
+                const { verifyToken } = require("../utils/jwt");
+                const decoded = verifyToken(authHeader.split(" ")[1]);
+                identifier = decoded.userId || decoded.id || decoded._id || decoded.phone;
+                role = decoded.role;
+            } catch (err) {}
+        }
+
+        if (!identifier) {
+            identifier = req.body.userId || req.body.user_id || req.body.phone || req.body.id;
+        }
+
+        if (!role) {
+            role = req.body.role || "astrologer";
+        }
+
+        const phoneFallback = req.body.phone || null;
+        const { amount, payoutMethod, upiId, accountNumber, ifscCode, accountHolder } = req.body;
+
+        const numericAmount = parseFloat(amount);
+        if (isNaN(numericAmount) || numericAmount <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid withdrawal amount. Must be a positive number." });
+        }
+
+        if (numericAmount < 100) {
+            return res.status(400).json({ success: false, message: "Minimum withdrawal amount is ₹100." });
+        }
+
+        const Astrologer = require("../models/astro.model");
+        let astrologer = null;
+
+        if (identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+            astrologer = await Astrologer.findById(identifier);
+        }
+        if (!astrologer && identifier) {
+            astrologer = await Astrologer.findOne({
+                $or: [
+                    { email: identifier },
+                    { phone: identifier },
+                    { name: identifier }
+                ]
+            });
+        }
+        if (!astrologer && phoneFallback) {
+            astrologer = await Astrologer.findOne({ phone: phoneFallback });
+        }
+
+        if (!astrologer) {
+            return res.status(404).json({ success: false, message: "Astrologer record not found in system." });
+        }
+
+        if ((astrologer.walletBalance || 0) < numericAmount) {
+            return res.status(400).json({ success: false, message: "Insufficient wallet balance for withdrawal." });
+        }
+
+        if (payoutMethod === "upi" && !upiId) {
+            return res.status(400).json({ success: false, message: "UPI ID is required for UPI withdrawal." });
+        }
+
+        if (payoutMethod === "bank" && (!accountNumber || !ifscCode || !accountHolder)) {
+            return res.status(400).json({ success: false, message: "Complete Bank account details are required." });
+        }
+
+        // Deduct from Astrologer wallet
+        astrologer.walletBalance = (astrologer.walletBalance || 0) - numericAmount;
+        await astrologer.save();
+
+        // Create Payout request
+        const Payout = require("../models/payout.model");
+        const payout = await Payout.create({
+            astrologer: astrologer._id,
+            amount: numericAmount,
+            payoutMethod,
+            upiId: payoutMethod === "upi" ? upiId : null,
+            accountNumber: payoutMethod === "bank" ? accountNumber : null,
+            ifscCode: payoutMethod === "bank" ? ifscCode : null,
+            accountHolder: payoutMethod === "bank" ? accountHolder : null,
+            status: "Pending"
+        });
+
+        console.log(`💸 Withdrawal requested by Astrologer ${astrologer._id} for ₹${numericAmount}. Payout ID: ${payout._id}`);
+
+        return res.status(200).json({
+            success: true,
+            message: `Withdrawal request for ₹${numericAmount.toFixed(2)} submitted successfully.`,
+            data: payout
+        });
+
+    } catch (error) {
+        console.error("POST /api/wallet/withdraw error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+/**
  * GET /api/wallet/transactions
  * Returns transaction history for user or astrologer
  */
 router.get("/transactions", async (req, res) => {
     try {
         let identifier = null;
+        let role = null;
 
         const authHeader = req.headers.authorization;
         if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -198,18 +358,40 @@ router.get("/transactions", async (req, res) => {
                 const { verifyToken } = require("../utils/jwt");
                 const decoded = verifyToken(authHeader.split(" ")[1]);
                 identifier = decoded.userId || decoded.id || decoded._id || decoded.phone;
+                role = decoded.role;
             } catch (err) {}
         }
 
         if (!identifier) identifier = req.query.userId || req.query.phone;
+        if (!role) role = req.query.role || null;
         const phoneFallback = req.query.phone || null;
 
-        let user = await findUserByIdentifier(identifier, phoneFallback);
+        let user = null;
         let astrologer = null;
 
-        if (!user && identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+        if (role === "astrologer") {
             const Astrologer = require("../models/astro.model");
-            astrologer = await Astrologer.findById(identifier);
+            if (identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+                astrologer = await Astrologer.findById(identifier);
+            }
+            if (!astrologer && identifier) {
+                astrologer = await Astrologer.findOne({
+                    $or: [
+                        { email: identifier },
+                        { phone: identifier },
+                        { name: identifier }
+                    ]
+                });
+            }
+            if (!astrologer && phoneFallback) {
+                astrologer = await Astrologer.findOne({ phone: phoneFallback });
+            }
+        } else {
+            user = await findUserByIdentifier(identifier, phoneFallback);
+            if (!user && identifier && mongoose.Types.ObjectId.isValid(identifier)) {
+                const Astrologer = require("../models/astro.model");
+                astrologer = await Astrologer.findById(identifier);
+            }
         }
 
         if (!user && !astrologer) {
@@ -219,20 +401,25 @@ router.get("/transactions", async (req, res) => {
         const VideoSession = require("../models/videoSession.model");
         const ChatSession = require("../models/chatSession.model");
         const Payment = require("../models/payment.model");
+        const Payout = require("../models/payout.model");
 
         const txns = [];
 
         if (astrologer) {
-            const [callSessions, chatSessions] = await Promise.all([
-                VideoSession.find({ astrologer: astrologer._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
+            const [callSessions, chatSessions, payoutList] = await Promise.all([
+                VideoSession.find({ astrologer: astrologer._id, status: "COMPLETED" })
                     .sort({ updatedAt: -1 })
                     .limit(20)
                     .populate("user", "name firstname lastname phone")
                     .lean(),
-                ChatSession.find({ astrologer: astrologer._id, status: { $in: ["COMPLETED", "ACTIVE"] } })
+                ChatSession.find({ astrologer: astrologer._id, status: "COMPLETED" })
                     .sort({ updatedAt: -1 })
                     .limit(20)
                     .populate("user", "name firstname lastname phone")
+                    .lean(),
+                Payout.find({ astrologer: astrologer._id })
+                    .sort({ createdAt: -1 })
+                    .limit(20)
                     .lean()
             ]);
 
@@ -241,14 +428,14 @@ router.get("/transactions", async (req, res) => {
                     const clientName = s.user?.name || `${s.user?.firstname || ""} ${s.user?.lastname || ""}`.trim() || s.user?.phone || "Client";
                     txns.push({
                         id: String(s._id),
+                        transactionId: String(s._id),
                         title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
+                        description: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
+                        paymentMethod: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
                         date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        amount: `+ ₹${(s.astrologerEarnings || 0).toFixed(2)}`,
-                        amountClass: "text-green-600",
-                        status: "Earned",
-                        statusClass: "text-green-500",
-                        iconBg: "bg-green-50 text-green-500",
-                        iconType: s.callType === "VIDEO" ? "video" : "phone",
+                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        amount: s.astrologerEarnings,
+                        status: "Completed",
                         type: "credit"
                     });
                 }
@@ -259,17 +446,33 @@ router.get("/transactions", async (req, res) => {
                     const clientName = s.user?.name || `${s.user?.firstname || ""} ${s.user?.lastname || ""}`.trim() || s.user?.phone || "Client";
                     txns.push({
                         id: String(s._id),
+                        transactionId: String(s._id),
                         title: `Chat with ${clientName}`,
+                        description: `Chat with ${clientName}`,
+                        paymentMethod: `Chat with ${clientName}`,
                         date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        amount: `+ ₹${(s.astrologerEarnings || 0).toFixed(2)}`,
-                        amountClass: "text-green-600",
-                        status: "Earned",
-                        statusClass: "text-green-500",
-                        iconBg: "bg-green-50 text-green-500",
-                        iconType: "message",
+                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        amount: s.astrologerEarnings,
+                        status: "Completed",
                         type: "credit"
                     });
                 }
+            });
+
+            payoutList.forEach(p => {
+                const methodStr = p.payoutMethod === "upi" ? `UPI Withdrawal (${p.upiId})` : `Bank Withdrawal (A/C: ...${String(p.accountNumber).slice(-4)})`;
+                txns.push({
+                    id: String(p._id),
+                    transactionId: `WDR-${String(p._id).slice(-4).toUpperCase()}`,
+                    title: methodStr,
+                    description: methodStr,
+                    paymentMethod: methodStr,
+                    date: new Date(p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                    createdAt: p.createdAt,
+                    amount: p.amount,
+                    status: p.status,
+                    type: "debit"
+                });
             });
         } else {
             const [callSessions, chatSessions] = await Promise.all([
@@ -289,14 +492,12 @@ router.get("/transactions", async (req, res) => {
                 if (s.totalAmountDeducted > 0) {
                     txns.push({
                         id: String(s._id),
+                        transactionId: String(s._id),
                         title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${s.astrologer?.name || "Astrologer"}`,
                         date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        amount: `- ₹${(s.totalAmountDeducted || 0).toFixed(2)}`,
-                        amountClass: "text-gray-800",
+                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        amount: s.totalAmountDeducted,
                         status: "Completed",
-                        statusClass: "text-gray-400",
-                        iconBg: "bg-pink-50 text-pink-500",
-                        iconType: s.callType === "VIDEO" ? "video" : "phone",
                         type: "debit"
                     });
                 }
@@ -306,14 +507,12 @@ router.get("/transactions", async (req, res) => {
                 if (s.totalAmountDeducted > 0) {
                     txns.push({
                         id: String(s._id),
+                        transactionId: String(s._id),
                         title: `Chat with ${s.astrologer?.name || "Astrologer"}`,
                         date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        amount: `- ₹${(s.totalAmountDeducted || 0).toFixed(2)}`,
-                        amountClass: "text-gray-800",
+                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        amount: s.totalAmountDeducted,
                         status: "Completed",
-                        statusClass: "text-gray-400",
-                        iconBg: "bg-pink-50 text-pink-500",
-                        iconType: "message",
                         type: "debit"
                     });
                 }
@@ -326,14 +525,12 @@ router.get("/transactions", async (req, res) => {
                     if (p.paymentStatus === "success") {
                         txns.push({
                             id: String(p._id),
+                            transactionId: p.transactionId || String(p._id),
                             title: p.appointment ? `Payment for appointment` : `Added Money`,
                             date: new Date(p.paidAt || p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                            amount: `+ ₹${(p.amount || 0).toFixed(2)}`,
-                            amountClass: "text-green-600",
+                            createdAt: p.paidAt || p.createdAt,
+                            amount: p.amount,
                             status: "Success",
-                            statusClass: "text-green-500",
-                            iconBg: "bg-green-50 text-green-500",
-                            iconType: "wallet",
                             type: "credit",
                             meta: {
                                 paymentGateway: p.paymentGateway,
@@ -344,14 +541,12 @@ router.get("/transactions", async (req, res) => {
                     } else if (p.paymentStatus === "failed") {
                         txns.push({
                             id: String(p._id),
+                            transactionId: p.transactionId || String(p._id),
                             title: `Failed Payment`,
                             date: new Date(p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                            amount: `- ₹${(p.amount || 0).toFixed(2)}`,
-                            amountClass: "text-gray-800",
+                            createdAt: p.createdAt,
+                            amount: p.amount,
                             status: "Failed",
-                            statusClass: "text-red-500",
-                            iconBg: "bg-gray-50 text-gray-400",
-                            iconType: "alert",
                             type: "failed",
                             meta: {
                                 paymentGateway: p.paymentGateway,
@@ -366,7 +561,8 @@ router.get("/transactions", async (req, res) => {
             }
         }
 
-        txns.sort((a, b) => new Date(b.date) - new Date(a.date));
+        // Sort descending by date/createdAt
+        txns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
         return res.status(200).json({
             success: true,

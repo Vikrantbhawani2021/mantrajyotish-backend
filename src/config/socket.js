@@ -662,11 +662,35 @@ const initSocket = (server) => {
                 stopCallBillingTimer(sessionId);
                 const session = await videoSessionService.endCallSession(sessionId);
 
-                io.to(`call_${sessionId}`).emit("call_ended", {
+                const payload = {
                     success: true,
                     message: "Call session ended successfully.",
                     session
-                });
+                };
+
+                io.to(`call_${sessionId}`).emit("call_ended", payload);
+
+                // Safely broadcast to individual user and astrologer personal rooms
+                const rawUser = session.user;
+                const userId = (rawUser && typeof rawUser === "object")
+                    ? String(rawUser._id || rawUser.id || "")
+                    : String(rawUser || "");
+
+                const rawAstro = session.astrologer;
+                const astroId = (rawAstro && typeof rawAstro === "object")
+                    ? String(rawAstro._id || rawAstro.id || "")
+                    : String(rawAstro || "");
+
+                if (userId) {
+                    io.to(`user_${userId}`).emit("call_ended", payload);
+                    io.to(userId).emit("call_ended", payload);
+                }
+                if (astroId) {
+                    io.to(`user_${astroId}`).emit("call_ended", payload);
+                    io.to(`astro_${astroId}`).emit("call_ended", payload);
+                    io.to(`astrologer_${astroId}`).emit("call_ended", payload);
+                    io.to(astroId).emit("call_ended", payload);
+                }
 
             } catch (err) {
                 console.error("end_call_session socket error:", err);

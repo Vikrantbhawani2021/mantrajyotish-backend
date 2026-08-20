@@ -155,7 +155,7 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
     }
 
     const populatedSession = await VideoSession.findById(session._id)
-        .populate("user", "firstname lastname phone profileImage walletBalance")
+        .populate("user", "firstname lastname phone profileImage walletBalance dateofbirth timeofbirth placeofbirth name")
         .populate("astrologer", "name profileImage consultationFee specialization");
 
     return populatedSession;
@@ -186,7 +186,7 @@ const acceptCallSession = async (sessionId) => {
     await session.save();
 
     const updatedSession = await VideoSession.findById(session._id)
-        .populate("user", "firstname lastname phone profileImage walletBalance")
+        .populate("user", "firstname lastname phone profileImage walletBalance dateofbirth timeofbirth placeofbirth name")
         .populate("astrologer", "name profileImage consultationFee");
 
     return {
@@ -282,7 +282,7 @@ const endCallSession = async (sessionId) => {
 const getVideoSessionById = async (id) => {
     return await VideoSession.findById(id)
         .populate("appointment")
-        .populate("user", "firstname lastname phone profileImage walletBalance")
+        .populate("user", "firstname lastname phone profileImage walletBalance dateofbirth timeofbirth placeofbirth name")
         .populate("astrologer", "name profileImage consultationFee specialization");
 };
 
@@ -300,7 +300,7 @@ const getCallHistory = async (userId, role = "user") => {
     const query = role === "astrologer" ? { astrologer: targetId } : { user: targetId };
     return await VideoSession.find(query)
         .sort({ createdAt: -1 })
-        .populate("user", "firstname lastname phone profileImage")
+        .populate("user", "firstname lastname phone profileImage dateofbirth timeofbirth placeofbirth name")
         .populate("astrologer", "name profileImage consultationFee");
 };
 
