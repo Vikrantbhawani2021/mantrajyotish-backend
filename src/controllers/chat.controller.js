@@ -337,31 +337,40 @@ exports.endChat = async (req, res, next) => {
         if (session.status === "ACTIVE") {
             stopBillingTimer(sessionId);
 
-            session.status = "COMPLETED";
-            session.endTime = new Date();
-            const durationMs = session.endTime.getTime() - new Date(session.startTime).getTime();
-            const durationMinutes = Math.max(1, Math.ceil(durationMs / 60000));
-            session.totalDurationMinutes = durationMinutes;
+            const endTime = new Date();
+            const startTime = session.startTime;
+            let durationSeconds = 0;
+            let expectedCost = 0;
 
-            // Billing Reconciliation: Charge user and pay astrologer for final minutes
+            if (startTime) {
+                const durationMs = endTime.getTime() - new Date(startTime).getTime();
+                durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
+                const ratePerMin = session.perMinuteRate || 20;
+                const ratePerSec = ratePerMin / 60;
+                expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
+            }
+
+            session.status = "COMPLETED";
+            session.endTime = endTime;
+            session.totalDurationMinutes = Math.ceil(durationSeconds / 60);
+
+            // Billing Reconciliation: Charge user and pay astrologer for final seconds
             try {
                 const user = await User.findById(session.user);
                 const astrologer = await Astrologer.findById(session.astrologer);
                 
                 if (user && astrologer) {
-                    const rate = session.perMinuteRate || astrologer.consultationFee || 20;
-                    const expectedCost = durationMinutes * rate;
                     const chargedSoFar = session.totalAmountDeducted || 0;
                     const difference = expectedCost - chargedSoFar;
                     
                     if (difference > 0) {
                         // Deduct remaining balance from user wallet
                         const prevUserBalance = user.walletBalance || 0;
-                        user.walletBalance = Math.max(0, prevUserBalance - difference);
+                        user.walletBalance = Math.max(0, parseFloat((prevUserBalance - difference).toFixed(2)));
                         
                         // Add earnings to astrologer wallet
                         const prevAstroBalance = astrologer.walletBalance || 0;
-                        astrologer.walletBalance = prevAstroBalance + difference;
+                        astrologer.walletBalance = parseFloat((prevAstroBalance + difference).toFixed(2));
                         
                         session.totalAmountDeducted = expectedCost;
                         session.astrologerEarnings = expectedCost;

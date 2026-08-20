@@ -9,13 +9,14 @@ const generateRoomId = (prefix = "room") => {
 };
 
 const findUserByIdOrRef = async (id) => {
+    if (!id) return null;
     const mongoose = require("mongoose");
     let user = null;
 
-    if (id && mongoose.Types.ObjectId.isValid(id)) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
         user = await User.findById(id);
     }
-    if (!user && id) {
+    if (!user) {
         const orConditions = [
             { phone: id },
             { phone: "+91" + String(id).replace(/\D/g, "") },
@@ -27,26 +28,17 @@ const findUserByIdOrRef = async (id) => {
         }
         user = await User.findOne({ $or: orConditions });
     }
-    if (!user) {
-        user = await User.findOne().sort({ createdAt: -1 });
-    }
-    if (!user) {
-        user = await User.create({
-            name: "Client User",
-            phone: "+919876543210",
-            walletBalance: 1000
-        });
-    }
     return user;
 };
 
 const findAstrologerByIdOrRef = async (id) => {
+    if (!id) return null;
     const mongoose = require("mongoose");
     let astro = null;
-    if (id && mongoose.Types.ObjectId.isValid(id)) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
         astro = await Astrologer.findById(id);
     }
-    if (!astro && id) {
+    if (!astro) {
         const orConditions = [
             { email: id },
             { name: id }
@@ -55,18 +47,6 @@ const findAstrologerByIdOrRef = async (id) => {
             orConditions.push({ user: id }, { astrologerLogin: id });
         }
         astro = await Astrologer.findOne({ $or: orConditions });
-    }
-    if (!astro) {
-        astro = await Astrologer.findOne({ isApproved: true }) || await Astrologer.findOne();
-    }
-    if (!astro) {
-        astro = await Astrologer.create({
-            name: "SANJEEV BABA",
-            phone: "+919999999999",
-            consultationFee: 15,
-            isApproved: true,
-            isOnline: true
-        });
     }
     return astro;
 };
@@ -228,34 +208,40 @@ const endCallSession = async (sessionId) => {
     if (!session) throw new Error("Call session not found");
 
     const endTime = new Date();
-    const startTime = session.startTime || session.createdAt || endTime;
-    const durationMs = endTime.getTime() - new Date(startTime).getTime();
-    const durationMinutes = Math.max(1, Math.ceil(durationMs / 60000));
+    const startTime = session.startTime;
+    let durationSeconds = 0;
+    let expectedCost = 0;
+
+    if (startTime) {
+        const durationMs = endTime.getTime() - new Date(startTime).getTime();
+        durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
+        const ratePerMin = session.perMinuteRate || 25;
+        const ratePerSec = ratePerMin / 60;
+        expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
+    }
 
     session.status = "COMPLETED";
     session.endTime = endTime;
-    session.totalDurationMinutes = durationMinutes;
-    session.duration = durationMinutes;
+    session.totalDurationMinutes = Math.ceil(durationSeconds / 60);
+    session.duration = Math.ceil(durationSeconds / 60);
 
-    // Billing Reconciliation: Charge user and pay astrologer for final minutes
+    // Billing Reconciliation: Charge user and pay astrologer for final seconds
     try {
         const user = await User.findById(session.user);
         const astrologer = await Astrologer.findById(session.astrologer);
         
         if (user && astrologer) {
-            const rate = session.perMinuteRate || astrologer.consultationFee || 25;
-            const expectedCost = durationMinutes * rate;
             const chargedSoFar = session.totalAmountDeducted || 0;
             const difference = expectedCost - chargedSoFar;
             
             if (difference > 0) {
                 // Deduct remaining balance from user wallet
                 const prevUserBalance = user.walletBalance || 0;
-                user.walletBalance = Math.max(0, prevUserBalance - difference);
+                user.walletBalance = Math.max(0, parseFloat((prevUserBalance - difference).toFixed(2)));
                 
                 // Add earnings to astrologer wallet
                 const prevAstroBalance = astrologer.walletBalance || 0;
-                astrologer.walletBalance = prevAstroBalance + difference;
+                astrologer.walletBalance = parseFloat((prevAstroBalance + difference).toFixed(2));
                 
                 session.totalAmountDeducted = expectedCost;
                 session.astrologerEarnings = expectedCost;
