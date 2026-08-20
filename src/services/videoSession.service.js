@@ -72,8 +72,12 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
         throw new Error("Astrologer is not approved to accept call consultations.");
     }
 
-    if (!astrologer.isOnline && !astrologer.isAvailable) {
-        throw new Error("Astrologer is currently offline/unavailable for call consultations.");
+    if (!astrologer.isOnline) {
+        throw new Error("Astrologer is currently offline.");
+    }
+
+    if (!astrologer.isAvailable) {
+        throw new Error("Astrologer is busy with another consultation.");
     }
 
     const perMinuteRate = astrologer.consultationFee || 0;
@@ -165,6 +169,23 @@ const acceptCallSession = async (sessionId) => {
     if (!session.startTime) session.startTime = new Date();
     await session.save();
 
+    // Mark astrologer as busy/unavailable in real time
+    const Astrologer = require("../models/astro.model");
+    const astro = await Astrologer.findById(session.astrologer);
+    if (astro) {
+        astro.isAvailable = false;
+        await astro.save();
+        console.log(`📶 Astrologer ${astro.name} is now BUSY (active call started)`);
+        
+        // Invalidate Redis online listing cache
+        try {
+            const { deleteCache } = require("./redis.service");
+            await deleteCache("online_astrologers");
+        } catch (err) {
+            console.error("Failed to clear Redis online cache on acceptCallSession:", err);
+        }
+    }
+
     const updatedSession = await VideoSession.findById(session._id)
         .populate("user", "firstname lastname phone profileImage walletBalance dateofbirth timeofbirth placeofbirth name")
         .populate("astrologer", "name profileImage consultationFee");
@@ -220,9 +241,14 @@ const endCallSession = async (sessionId) => {
         expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
     }
 
-    session.status = "COMPLETED";
+    if (session.status === "PENDING") {
+        session.status = "CANCELLED";
+    } else {
+        session.status = "COMPLETED";
+    }
     session.endTime = endTime;
     session.totalDurationMinutes = Math.ceil(durationSeconds / 60);
+    session.totalDurationSeconds = durationSeconds;
     session.duration = Math.ceil(durationSeconds / 60);
 
     // Billing Reconciliation: Charge user and pay astrologer for final seconds
@@ -259,6 +285,45 @@ const endCallSession = async (sessionId) => {
     }
 
     await session.save();
+
+    // Restore astrologer availability if they are no longer in an active call/chat
+    try {
+        const Astrologer = require("../models/astro.model");
+        const ChatSession = require("../models/chatSession.model");
+        const astro = await Astrologer.findById(session.astrologer);
+        if (astro) {
+            const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
+            const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } });
+            astro.isAvailable = !activeChat && !activeCall;
+            await astro.save();
+            console.log(`📶 Astrologer ${astro.name} availability updated: ${astro.isAvailable ? 'AVAILABLE' : 'BUSY'}`);
+            
+            // Invalidate Redis online listing cache
+            try {
+                const { deleteCache } = require("./redis.service");
+                await deleteCache("online_astrologers");
+            } catch (err) {
+                console.error("Failed to clear Redis online cache on endCallSession:", err);
+            }
+
+            // Broadcast status change to all clients
+            try {
+                const { getIO } = require("../config/socket");
+                const io = getIO();
+                if (io) {
+                    io.emit("astrologer_status_changed", {
+                        astrologerId: String(astro._id),
+                        isOnline: Boolean(astro.isOnline),
+                        isAvailable: Boolean(astro.isAvailable)
+                    });
+                }
+            } catch (socketErr) {
+                console.error("Failed to emit status change event on endCallSession:", socketErr);
+            }
+        }
+    } catch (e) {
+        console.error("Error updating astrologer availability on call end:", e);
+    }
     return session;
 };
 

@@ -32,20 +32,29 @@ const startBillingTimer = (sessionId, io) => {
 
             const rate = session.perMinuteRate || 10;
 
-            // Auto-topup balance if low so sessions never get interrupted or vanish to 0
+            // If user has insufficient balance, end the chat session
             if ((user.walletBalance || 0) < rate) {
-                console.log(`⚡ Auto-replenishing user ${user._id} wallet balance for active chat session`);
-                user.walletBalance = (user.walletBalance || 0) + Math.max(1000, rate * 40);
-                await user.save();
+                stopBillingTimer(sessionId);
+                session.status = "COMPLETED";
+                session.endTime = new Date();
+                await session.save();
+                if (io) {
+                    const endPayload = { sessionId, message: "Chat ended: insufficient wallet balance." };
+                    io.to(`session_${sessionId}`).emit("chat_ended_insufficient_funds", endPayload);
+                    const rawUser = session.user;
+                    const userId = (rawUser && typeof rawUser === "object") ? String(rawUser._id || "") : String(rawUser || "");
+                    if (userId) io.to(`user_${userId}`).emit("chat_ended_insufficient_funds", endPayload);
+                }
+                return;
             }
 
             // Normal 1-minute deduction
-            user.walletBalance -= rate;
-            astrologer.walletBalance = (astrologer.walletBalance || 0) + rate;
+            user.walletBalance = parseFloat((user.walletBalance - rate).toFixed(2));
+            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + rate).toFixed(2));
 
             session.totalDurationMinutes += 1;
-            session.totalAmountDeducted += rate;
-            session.astrologerEarnings += rate;
+            session.totalAmountDeducted = parseFloat(((session.totalAmountDeducted || 0) + rate).toFixed(2));
+            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + rate).toFixed(2));
 
             await user.save();
             await astrologer.save();
@@ -92,7 +101,121 @@ const stopBillingTimer = (sessionId) => {
     }
 };
 
+/**
+ * End Active Chat Session & Reconcile Wallet Balances based on exact seconds
+ */
+const endChatSession = async (sessionId) => {
+    const ChatSession = require("../models/chatSession.model");
+    const User = require("../models/user.model");
+    const Astrologer = require("../models/astro.model");
+
+    const session = await ChatSession.findById(sessionId);
+    if (!session) throw new Error("Chat session not found");
+
+    if (session.status === "ACTIVE") {
+        stopBillingTimer(sessionId);
+
+        const endTime = new Date();
+        const startTime = session.startTime;
+        let durationSeconds = 0;
+        let expectedCost = 0;
+
+        if (startTime) {
+            const durationMs = endTime.getTime() - new Date(startTime).getTime();
+            durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
+            const ratePerMin = session.perMinuteRate || 20;
+            const ratePerSec = ratePerMin / 60;
+            expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
+        }
+
+        session.status = "COMPLETED";
+        session.endTime = endTime;
+        session.totalDurationMinutes = Math.ceil(durationSeconds / 60);
+        session.totalDurationSeconds = durationSeconds;
+
+        // Billing Reconciliation: Charge user and pay astrologer for final seconds
+        try {
+            const user = await User.findById(session.user);
+            const astrologer = await Astrologer.findById(session.astrologer);
+            
+            if (user && astrologer) {
+                const chargedSoFar = session.totalAmountDeducted || 0;
+                const difference = expectedCost - chargedSoFar;
+                
+                if (difference > 0) {
+                    // Deduct remaining balance from user wallet
+                    const prevUserBalance = user.walletBalance || 0;
+                    user.walletBalance = Math.max(0, parseFloat((prevUserBalance - difference).toFixed(2)));
+                    
+                    // Add earnings to astrologer wallet
+                    const prevAstroBalance = astrologer.walletBalance || 0;
+                    astrologer.walletBalance = parseFloat((prevAstroBalance + difference).toFixed(2));
+                    
+                    session.totalAmountDeducted = expectedCost;
+                    session.astrologerEarnings = expectedCost;
+                    
+                    await user.save();
+                    await astrologer.save();
+                    console.log(`💰 [Chat Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${difference}. Full cost: ₹${expectedCost}`);
+                } else {
+                    session.totalAmountDeducted = Math.max(session.totalAmountDeducted || 0, expectedCost);
+                    session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedCost);
+                }
+            }
+        } catch (billingErr) {
+            console.error("❌ Failed to reconcile chat billing on end:", billingErr);
+        }
+
+        await session.save();
+    } else if (session.status === "PENDING") {
+        session.status = "CANCELLED";
+        await session.save();
+    }
+
+    // Restore astrologer availability if they are no longer in an active call/chat
+    try {
+        const Astrologer = require("../models/astro.model");
+        const VideoSession = require("../models/videoSession.model");
+        const astro = await Astrologer.findById(session.astrologer);
+        if (astro) {
+            const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } });
+            const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
+            astro.isAvailable = !activeChat && !activeCall;
+            await astro.save();
+            console.log(`📶 Astrologer ${astro.name} availability updated: ${astro.isAvailable ? 'AVAILABLE' : 'BUSY'}`);
+            
+            // Invalidate Redis online listing cache
+            try {
+                const { deleteCache } = require("./redis.service");
+                await deleteCache("online_astrologers");
+            } catch (err) {
+                console.error("Failed to clear Redis online cache on endChatSession:", err);
+            }
+
+            // Broadcast status change to all clients
+            try {
+                const { getIO } = require("../config/socket");
+                const io = getIO();
+                if (io) {
+                    io.emit("astrologer_status_changed", {
+                        astrologerId: String(astro._id),
+                        isOnline: Boolean(astro.isOnline),
+                        isAvailable: Boolean(astro.isAvailable)
+                    });
+                }
+            } catch (socketErr) {
+                console.error("Failed to emit status change event on endChatSession:", socketErr);
+            }
+        }
+    } catch (e) {
+        console.error("Error updating astrologer availability on chat end:", e);
+    }
+
+    return session;
+};
+
 module.exports = {
     startBillingTimer,
-    stopBillingTimer
+    stopBillingTimer,
+    endChatSession
 };

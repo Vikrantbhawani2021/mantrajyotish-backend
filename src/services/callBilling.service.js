@@ -34,20 +34,29 @@ const startCallBillingTimer = (sessionId, io) => {
 
             const rate = session.perMinuteRate || astrologer.consultationFee || 25;
 
-            // Auto-topup balance if low so calls never get interrupted or vanish to 0
+            // If user has insufficient balance, end the session
             if ((user.walletBalance || 0) < rate) {
-                console.log(`⚡ Auto-replenishing user ${user._id} wallet balance from ${user.walletBalance} to ${Math.max(1000, rate * 40)} for active call session`);
-                user.walletBalance = (user.walletBalance || 0) + Math.max(1000, rate * 40);
-                await user.save();
+                stopCallBillingTimer(sessionId);
+                session.status = "COMPLETED";
+                session.endTime = new Date();
+                await session.save();
+                if (io) {
+                    const endPayload = { sessionId, message: "Call ended: insufficient wallet balance." };
+                    io.to(`call_${sessionId}`).emit("call_ended_insufficient_funds", endPayload);
+                    const rawUser = session.user;
+                    const userId = (rawUser && typeof rawUser === "object") ? String(rawUser._id || "") : String(rawUser || "");
+                    if (userId) io.to(`user_${userId}`).emit("call_ended_insufficient_funds", endPayload);
+                }
+                return;
             }
 
             // Deduct per-minute rate
-            user.walletBalance -= rate;
-            astrologer.walletBalance = (astrologer.walletBalance || 0) + rate;
+            user.walletBalance = parseFloat((user.walletBalance - rate).toFixed(2));
+            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + rate).toFixed(2));
 
             session.totalDurationMinutes += 1;
-            session.totalAmountDeducted += rate;
-            session.astrologerEarnings += rate;
+            session.totalAmountDeducted = parseFloat(((session.totalAmountDeducted || 0) + rate).toFixed(2));
+            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + rate).toFixed(2));
 
             await user.save();
             await astrologer.save();

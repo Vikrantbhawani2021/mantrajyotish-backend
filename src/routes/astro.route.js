@@ -27,6 +27,7 @@ router.put("/toggle-online", authMiddleware, astroController.toggleOnlineStatus)
 router.put("/toggle-online/:id", authMiddleware, astroController.toggleOnlineStatus);
 
 // Details by ID
+router.get("/reviews/:id", astroController.getAstrologerReviews);
 router.get("/:id", astroController.getAstrologerById);
 
 // Update & Delete

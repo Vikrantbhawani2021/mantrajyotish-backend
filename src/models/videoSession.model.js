@@ -2,6 +2,13 @@ const mongoose = require("mongoose");
 
 const VideoSessionSchema = new mongoose.Schema(
 {
+    sessionCode: {
+        type: String,
+        unique: true,
+        sparse: true,
+        trim: true
+    },
+
     appointment: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Appointment",
@@ -85,6 +92,12 @@ const VideoSessionSchema = new mongoose.Schema(
         min: 0
     },
 
+    totalDurationSeconds: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+
     startTime: {
         type: Date,
         default: null
@@ -101,6 +114,18 @@ const VideoSessionSchema = new mongoose.Schema(
     },
 
     rejectionReason: {
+        type: String,
+        default: null
+    },
+
+    rating: {
+        type: Number,
+        min: 1,
+        max: 5,
+        default: null
+    },
+
+    review: {
         type: String,
         default: null
     },
@@ -125,6 +150,16 @@ const VideoSessionSchema = new mongoose.Schema(
 },
 {
     timestamps: true
+});
+
+// Auto-generate a readable session code on first save (e.g. CALL-M0XYZ123-AB3F)
+VideoSessionSchema.pre("save", function () {
+    if (!this.sessionCode) {
+        const ts = Date.now().toString(36).toUpperCase();
+        const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const prefix = this.callType === "VIDEO" ? "VID" : "CALL";
+        this.sessionCode = `${prefix}-${ts}-${rand}`;
+    }
 });
 
 module.exports = mongoose.model("VideoSession", VideoSessionSchema);

@@ -71,6 +71,27 @@ exports.initiateChat = async (req, res, next) => {
             });
         }
 
+        if (astrologer.status !== "approved") {
+            return res.status(403).json({
+                success: false,
+                message: "Astrologer is not approved to accept chat consultations yet."
+            });
+        }
+
+        if (!astrologer.isOnline) {
+            return res.status(400).json({
+                success: false,
+                message: "Astrologer is currently offline."
+            });
+        }
+
+        if (!astrologer.isAvailable) {
+            return res.status(400).json({
+                success: false,
+                message: "Astrologer is busy with another consultation."
+            });
+        }
+
         const perMinuteRate = astrologer.consultationFee || 0;
         const minBalanceRequired = perMinuteRate * 2;
 
@@ -209,6 +230,23 @@ exports.acceptChat = async (req, res, next) => {
         if (!session.startTime) session.startTime = new Date();
         await session.save();
 
+        // Mark astrologer as busy/unavailable in real time
+        const Astrologer = require("../models/astro.model");
+        const astro = await Astrologer.findById(session.astrologer);
+        if (astro) {
+            astro.isAvailable = false;
+            await astro.save();
+            console.log(`📶 Astrologer ${astro.name} is now BUSY (active chat started via REST API)`);
+            
+            // Invalidate Redis online listing cache
+            try {
+                const { deleteCache } = require("../services/redis.service");
+                await deleteCache("online_astrologers");
+            } catch (err) {
+                console.error("Failed to clear Redis online cache on acceptChat REST:", err);
+            }
+        }
+
         // Start per-minute billing recurring timer
         try {
             const { getIO } = require("../config/socket");
@@ -326,69 +364,8 @@ exports.endChat = async (req, res, next) => {
             });
         }
 
-        const session = await ChatSession.findById(sessionId);
-        if (!session) {
-            return res.status(404).json({
-                success: false,
-                message: "Chat session not found."
-            });
-        }
-
-        if (session.status === "ACTIVE") {
-            stopBillingTimer(sessionId);
-
-            const endTime = new Date();
-            const startTime = session.startTime;
-            let durationSeconds = 0;
-            let expectedCost = 0;
-
-            if (startTime) {
-                const durationMs = endTime.getTime() - new Date(startTime).getTime();
-                durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
-                const ratePerMin = session.perMinuteRate || 20;
-                const ratePerSec = ratePerMin / 60;
-                expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
-            }
-
-            session.status = "COMPLETED";
-            session.endTime = endTime;
-            session.totalDurationMinutes = Math.ceil(durationSeconds / 60);
-
-            // Billing Reconciliation: Charge user and pay astrologer for final seconds
-            try {
-                const user = await User.findById(session.user);
-                const astrologer = await Astrologer.findById(session.astrologer);
-                
-                if (user && astrologer) {
-                    const chargedSoFar = session.totalAmountDeducted || 0;
-                    const difference = expectedCost - chargedSoFar;
-                    
-                    if (difference > 0) {
-                        // Deduct remaining balance from user wallet
-                        const prevUserBalance = user.walletBalance || 0;
-                        user.walletBalance = Math.max(0, parseFloat((prevUserBalance - difference).toFixed(2)));
-                        
-                        // Add earnings to astrologer wallet
-                        const prevAstroBalance = astrologer.walletBalance || 0;
-                        astrologer.walletBalance = parseFloat((prevAstroBalance + difference).toFixed(2));
-                        
-                        session.totalAmountDeducted = expectedCost;
-                        session.astrologerEarnings = expectedCost;
-                        
-                        await user.save();
-                        await astrologer.save();
-                        console.log(`💰 [Chat Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${difference}. Full cost: ₹${expectedCost}`);
-                    } else {
-                        session.totalAmountDeducted = Math.max(session.totalAmountDeducted || 0, expectedCost);
-                        session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedCost);
-                    }
-                }
-            } catch (billingErr) {
-                console.error("❌ Failed to reconcile chat billing on end:", billingErr);
-            }
-
-            await session.save();
-        }
+        const { endChatSession } = require("../services/chatBilling.service");
+        const session = await endChatSession(sessionId);
 
         try {
             const { getIO } = require("../config/socket");
@@ -404,15 +381,18 @@ exports.endChat = async (req, res, next) => {
                 io.to(`session_${sessionId}`).emit("chat_ended", payload);
 
                 // Safely broadcast to individual user and astrologer personal rooms
-                const rawUser = session.user;
-                const userId = (rawUser && typeof rawUser === "object")
-                    ? String(rawUser._id || rawUser.id || "")
-                    : String(rawUser || "");
+                const extractIdString = (val) => {
+                    if (!val) return "";
+                    if (typeof val === "string") return val;
+                    if (typeof val === "object") {
+                        if (val._id) return String(val._id);
+                        if (val.id) return String(val.id);
+                    }
+                    return String(val);
+                };
 
-                const rawAstro = session.astrologer;
-                const astroId = (rawAstro && typeof rawAstro === "object")
-                    ? String(rawAstro._id || rawAstro.id || "")
-                    : String(rawAstro || "");
+                const userId = extractIdString(session.user);
+                const astroId = extractIdString(session.astrologer);
 
                 if (userId) {
                     io.to(`user_${userId}`).emit("chat_ended", payload);

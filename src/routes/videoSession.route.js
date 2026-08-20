@@ -17,6 +17,8 @@ router.post("/reject", videoSessionController.rejectCall);
 router.post("/reject/:id", videoSessionController.rejectCall);
 router.post("/end", videoSessionController.endCall);
 router.post("/end/:id", videoSessionController.endCall);
+router.post("/rate", videoSessionController.rateVideoSession);
+router.post("/rate/:id", videoSessionController.rateVideoSession);
 router.get("/history", videoSessionController.getCallHistory);
 
 // Legacy Scheduled Video Session Endpoints

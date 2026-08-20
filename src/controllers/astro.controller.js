@@ -372,11 +372,35 @@ const toggleOnlineStatus = async (req, res, next) => {
             isAvailable = isOnline;
         }
 
+        if (isOnline) {
+            try {
+                const { cleanupStaleSessions } = require("../config/socket");
+                await cleanupStaleSessions(astrologerId);
+            } catch (err) {
+                console.error("Failed to run cleanupStaleSessions in toggleOnlineStatus controller:", err);
+            }
+        }
+
         const updatedAstrologer = await astroService.toggleOnlineStatus(
             astrologerId,
             isOnline,
             isAvailable
         );
+
+        // Broadcast status change to all socket clients in real time
+        try {
+            const { getIO } = require("../config/socket");
+            const io = getIO();
+            if (io) {
+                io.emit("astrologer_status_changed", {
+                    astrologerId: String(updatedAstrologer._id),
+                    isOnline: Boolean(updatedAstrologer.isOnline),
+                    isAvailable: Boolean(updatedAstrologer.isAvailable)
+                });
+            }
+        } catch (socketErr) {
+            console.error("Failed to emit status change event on toggleOnlineStatus REST API:", socketErr);
+        }
 
         return res.status(200).json({
             success: true,
@@ -422,6 +446,61 @@ const deleteAstrologer = async (req, res, next) => {
     }
 };
 
+const getAstrologerReviews = async (req, res, next) => {
+    try {
+        const astrologerId = req.params.id || req.user?._id;
+        if (!astrologerId) {
+            return res.status(400).json({ success: false, message: "Astrologer ID is required." });
+        }
+
+        const ChatSession = require("../models/chatSession.model");
+        const VideoSession = require("../models/videoSession.model");
+
+        // Fetch rated chat sessions
+        const chatReviews = await ChatSession.find({
+            astrologer: astrologerId,
+            rating: { $ne: null }
+        })
+        .populate("user", "name firstname lastname profileImage avatar")
+        .lean();
+
+        // Fetch rated call sessions
+        const callReviews = await VideoSession.find({
+            astrologer: astrologerId,
+            rating: { $ne: null }
+        })
+        .populate("user", "name firstname lastname profileImage avatar")
+        .lean();
+
+        // Merge and format reviews
+        const formattedReviews = [
+            ...chatReviews.map(r => ({
+                id: r._id,
+                name: r.user?.name || `${r.user?.firstname || ""} ${r.user?.lastname || ""}`.trim() || "User Client",
+                rating: r.rating,
+                comment: r.review || "No comment left.",
+                type: "Chat",
+                createdAt: r.endTime || r.createdAt
+            })),
+            ...callReviews.map(r => ({
+                id: r._id,
+                name: r.user?.name || `${r.user?.firstname || ""} ${r.user?.lastname || ""}`.trim() || "User Client",
+                rating: r.rating,
+                comment: r.review || "No comment left.",
+                type: r.callType || "Call",
+                createdAt: r.endTime || r.createdAt
+            }))
+        ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        return res.status(200).json({
+            success: true,
+            data: formattedReviews
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     createAstrologer,
     getAllAstrologers,
@@ -432,5 +511,6 @@ module.exports = {
     rejectAstrologer,
     toggleOnlineStatus,
     updateAstrologer,
-    deleteAstrologer
+    deleteAstrologer,
+    getAstrologerReviews
 };

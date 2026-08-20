@@ -231,12 +231,23 @@ const rejectCall = async (req, res) => {
 
         try {
             const io = getIO();
-            io.to(`call_${targetId}`).emit("call_rejected", {
+            const payload = {
                 success: false,
                 message: "Call request was rejected",
                 reason: session.rejectionReason,
                 session
-            });
+            };
+            io.to(`call_${targetId}`).emit("call_rejected", payload);
+
+            // Also broadcast to user personal room in case they left the call room
+            const rawUser = session.user;
+            const userId = (rawUser && typeof rawUser === "object")
+                ? String(rawUser._id || rawUser.id || "")
+                : String(rawUser || "");
+            if (userId) {
+                io.to(`user_${userId}`).emit("call_rejected", payload);
+                io.to(userId).emit("call_rejected", payload);
+            }
         } catch (socketErr) {}
 
         return res.status(200).json({
@@ -278,15 +289,18 @@ const endCall = async (req, res) => {
             io.to(`call_${sessionId}`).emit("call_ended", payload);
 
             // Safely broadcast to individual user and astrologer personal rooms
-            const rawUser = session.user;
-            const userId = (rawUser && typeof rawUser === "object")
-                ? String(rawUser._id || rawUser.id || "")
-                : String(rawUser || "");
+            const extractIdString = (val) => {
+                if (!val) return "";
+                if (typeof val === "string") return val;
+                if (typeof val === "object") {
+                    if (val._id) return String(val._id);
+                    if (val.id) return String(val.id);
+                }
+                return String(val);
+            };
 
-            const rawAstro = session.astrologer;
-            const astroId = (rawAstro && typeof rawAstro === "object")
-                ? String(rawAstro._id || rawAstro.id || "")
-                : String(rawAstro || "");
+            const userId = extractIdString(session.user);
+            const astroId = extractIdString(session.astrologer);
 
             if (userId) {
                 io.to(`user_${userId}`).emit("call_ended", payload);
@@ -474,12 +488,61 @@ const getPendingCallRequests = async (req, res) => {
     }
 };
 
+// 7. RATE CALL SESSION
+const rateVideoSession = async (req, res) => {
+    try {
+        const sessionId = req.params.id || req.body.sessionId;
+        const { rating, review } = req.body;
+
+        if (!sessionId || !rating) {
+            return res.status(400).json({ success: false, message: "sessionId and rating are required." });
+        }
+
+        const numRating = parseFloat(rating);
+        if (isNaN(numRating) || numRating < 1 || numRating > 5) {
+            return res.status(400).json({ success: false, message: "Rating must be between 1 and 5." });
+        }
+
+        const VideoSession = require("../models/videoSession.model");
+        const Astrologer = require("../models/astro.model");
+
+        const session = await VideoSession.findById(sessionId);
+        if (!session) {
+            return res.status(404).json({ success: false, message: "Session not found." });
+        }
+
+        session.rating = numRating;
+        if (review) session.review = review;
+        await session.save();
+
+        // Recalculate astrologer average rating from all rated sessions
+        const astrologer = await Astrologer.findById(session.astrologer);
+        if (astrologer) {
+            const allRated = await VideoSession.find({ astrologer: session.astrologer, rating: { $ne: null } });
+            const total = allRated.reduce((sum, s) => sum + s.rating, 0);
+            astrologer.rating = Number((total / allRated.length).toFixed(1));
+            astrologer.totalReviews = allRated.length;
+            await astrologer.save();
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Rating submitted successfully.",
+            data: session
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+
 module.exports = {
     generateAgoraToken,
     requestCall,
     acceptCall,
     rejectCall,
     endCall,
+    rateVideoSession,
     getCallHistory,
     getPendingCallRequests,
     createVideoSession,
