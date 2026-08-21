@@ -854,7 +854,7 @@ const initSocket = (server) => {
         // 6. Mute / Camera Toggle State Sync
         socket.on("media_state_change", (data) => {
             const roomId = data.sessionId;
-            io.to(`session_${roomId}`)
+            socket.broadcast.to(`session_${roomId}`)
               .to(`call_${roomId}`)
               .to(roomId)
               .emit("media_state_changed", {
