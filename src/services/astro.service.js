@@ -1,12 +1,45 @@
 const Astrologer = require("../models/astro.model");
 const AstroInterview = require("../models/astroInterview.model");
+const User = require("../models/user.model");
+const AstrologerLogin = require("../models/astrologerLogin.model");
 const { getCache, setCache, deleteCache } = require("./redis.service");
 
 const CACHE_KEY_ONLINE = "online_astrologers";
 
+const rebuildOnlineAstrologersCache = async () => {
+    try {
+        console.log("🔄 Rebuilding online astrologers cache in Redis...");
+        const astrologers = await Astrologer.find({
+            status: "approved",
+            isOnline: true
+        })
+        .populate("user")
+        .populate("astrologerLogin")
+        .lean();
+
+        const astroIds = astrologers.map(a => a._id);
+        const interviews = await AstroInterview.find({ astrologer: { $in: astroIds } }).lean();
+        const interviewMap = {};
+        for (const iv of interviews) {
+            interviewMap[String(iv.astrologer)] = iv;
+        }
+
+        const result = astrologers.map(astro => ({
+            ...astro,
+            interview: interviewMap[String(astro._id)] || null
+        }));
+
+        await setCache(CACHE_KEY_ONLINE, JSON.stringify(result), 300);
+        console.log(`💾 Eagerly cached ${result.length} online astrologers in Redis`);
+        return result;
+    } catch (err) {
+        console.error("Failed to eagerly update Redis cache for online astrologers:", err.message);
+    }
+};
+
 const clearOnlineAstrologersCache = async () => {
-    console.log("🧹 Invalidating online astrologers cache in Redis");
-    await deleteCache(CACHE_KEY_ONLINE);
+    console.log("🧹 Invalidating and rebuilding online astrologers cache in Redis");
+    await rebuildOnlineAstrologersCache();
 };
 
 const createAstrologer = async (data) => {
@@ -85,34 +118,7 @@ const getOnlineAstrologers = async () => {
         }
     }
 
-    const astrologers = await Astrologer.find({
-        status: "approved",
-        $or: [
-            { isOnline: true },
-            { isAvailable: true }
-        ]
-    })
-    .populate("user")
-    .populate("astrologerLogin")
-    .lean();
-
-    // Batch fetch all interviews in ONE query instead of N queries
-    const astroIds = astrologers.map(a => a._id);
-    const interviews = await AstroInterview.find({ astrologer: { $in: astroIds } }).lean();
-    const interviewMap = {};
-    for (const iv of interviews) {
-        interviewMap[String(iv.astrologer)] = iv;
-    }
-
-    const result = astrologers.map(astro => ({
-        ...astro,
-        interview: interviewMap[String(astro._id)] || null
-    }));
-
-    // Cache the online list for 5 minutes (300 seconds)
-    await setCache(CACHE_KEY_ONLINE, JSON.stringify(result), 300);
-
-    return result;
+    return await rebuildOnlineAstrologersCache();
 };
 
 const getAstrologerById = async (id) => {
@@ -150,7 +156,8 @@ const rejectAstrologer = async (id) => {
             $set: {
                 status: "rejected",
                 isOnline: false,
-                isAvailable: false
+                isAvailable: false,
+                manualOffline: true
             }
         },
         { returnDocument: 'after' }
@@ -162,8 +169,19 @@ const rejectAstrologer = async (id) => {
 };
 
 const toggleOnlineStatus = async (id, isOnline, isAvailable) => {
+    // Sync status change directly to Redis presence first
+    try {
+        const { transitionStatus } = require("./presence.service");
+        await transitionStatus(id, isOnline ? "ONLINE" : "OFFLINE");
+    } catch (err) {
+        console.error(`Failed to transition presence status for astro ${id} in toggleOnlineStatus service:`, err.message);
+    }
+
     const updateData = {};
-    if (isOnline !== undefined) updateData.isOnline = Boolean(isOnline);
+    if (isOnline !== undefined) {
+        updateData.isOnline = Boolean(isOnline);
+        updateData.manualOffline = !isOnline;
+    }
     if (isAvailable !== undefined) updateData.isAvailable = Boolean(isAvailable);
 
     const updated = await Astrologer.findByIdAndUpdate(

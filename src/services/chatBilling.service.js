@@ -180,31 +180,20 @@ const endChatSession = async (sessionId) => {
         if (astro) {
             const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } });
             const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
-            astro.isAvailable = !activeChat && !activeCall;
-            await astro.save();
-            console.log(`📶 Astrologer ${astro.name} availability updated: ${astro.isAvailable ? 'AVAILABLE' : 'BUSY'}`);
             
-            // Invalidate Redis online listing cache
-            try {
-                const { deleteCache } = require("./redis.service");
-                await deleteCache("online_astrologers");
-            } catch (err) {
-                console.error("Failed to clear Redis online cache on endChatSession:", err);
-            }
-
-            // Broadcast status change to all clients
-            try {
-                const { getIO } = require("../config/socket");
-                const io = getIO();
-                if (io) {
-                    io.emit("astrologer_status_changed", {
-                        astrologerId: String(astro._id),
-                        isOnline: Boolean(astro.isOnline),
-                        isAvailable: Boolean(astro.isAvailable)
-                    });
-                }
-            } catch (socketErr) {
-                console.error("Failed to emit status change event on endChatSession:", socketErr);
+            if (activeChat || activeCall) {
+                // Keep BUSY if another session is active
+                astro.isAvailable = false;
+                await astro.save();
+            } else {
+                // No other active sessions. Check if socket connections still exist to determine ONLINE or OFFLINE
+                const { getPresence, transitionStatus } = require("./presence.service");
+                const presence = await getPresence(astro._id);
+                const hasConnections = presence && presence.connections > 0;
+                const nextStatus = hasConnections ? "ONLINE" : "OFFLINE";
+                
+                await transitionStatus(astro._id, nextStatus);
+                console.log(`📶 Astrologer ${astro.name} presence transitioned to ${nextStatus} on chat session end`);
             }
         }
     } catch (e) {

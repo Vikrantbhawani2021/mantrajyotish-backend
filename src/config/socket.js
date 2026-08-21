@@ -19,6 +19,7 @@ const { startCallBillingTimer, stopCallBillingTimer } = require("../services/cal
 const videoSessionService = require("../services/videoSession.service");
 
 let io;
+const disconnectTimeouts = new Map();
 
 const extractSessionId = (data) => {
     if (!data) return null;
@@ -123,6 +124,41 @@ const initSocket = (server) => {
         }
     });
 
+    // Configure Socket.io Redis Adapter for horizontal scalability
+    try {
+        const { createAdapter } = require("@socket.io/redis-adapter");
+        const { getRedisClient } = require("./redis");
+        const redisClient = getRedisClient();
+        if (redisClient) {
+            const pubClient = redisClient;
+            const subClient = redisClient.duplicate();
+            subClient.connect().then(() => {
+                io.adapter(createAdapter(pubClient, subClient));
+                console.log("🚀 Socket.IO Redis Adapter configured successfully!");
+            }).catch(err => {
+                console.error("⚠️ Failed to connect Redis subClient for Socket.IO Adapter:", err.message);
+            });
+        }
+    } catch (adapterErr) {
+        console.error("⚠️ Failed to initialize Socket.IO Redis Adapter:", adapterErr.message);
+    }
+
+    // Authenticate socket connections using JWT
+    io.use((socket, next) => {
+        const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+        if (token) {
+            try {
+                const { verifyToken } = require("../utils/jwt");
+                const decoded = verifyToken(token);
+                socket.decodedUser = decoded;
+            } catch (err) {
+                console.error("Socket JWT Authentication Failure:", err.message);
+                return next(new Error("Authentication error: Invalid or expired token."));
+            }
+        }
+        next();
+    });
+
     io.on("connection", (socket) => {
         console.log(`🔌 New Socket Connection Established: ${socket.id}`);
 
@@ -158,31 +194,52 @@ const initSocket = (server) => {
                         ]
                     });
                     if (astro) {
-                        socket.associatedAstroId = astro._id.toString();
+                        const actualAstroId = astro._id.toString();
+                        socket.associatedAstroId = actualAstroId;
+                        socket.join(`astrologer:${actualAstroId}`);
+
+                        const { getPresence, setPresence, transitionStatus } = require("../services/presence.service");
+                        
+                        // Clear pending disconnect timeout
+                        if (disconnectTimeouts.has(actualAstroId)) {
+                            clearTimeout(disconnectTimeouts.get(actualAstroId));
+                            disconnectTimeouts.delete(actualAstroId);
+                            console.log(`🔌 Cleared pending disconnect timeout for Astrologer ${astro.name} (${actualAstroId}) on reconnect`);
+                        }
+                        
+                        // Fetch/Create presence
+                        let presence = await getPresence(actualAstroId);
+                        if (!presence) {
+                            presence = {
+                                status: "OFFLINE",
+                                connections: 0,
+                                lastHeartbeat: Date.now(),
+                                activeSessionId: null,
+                                timestamp: Date.now(),
+                                version: 0
+                            };
+                        }
+
+                        // Increment active connections count
+                        presence.connections += 1;
+                        presence.lastHeartbeat = Date.now();
+                        await setPresence(actualAstroId, presence);
                         
                         // Clean up any stale sessions first to restore availability
                         await cleanupStaleSessions(astro._id);
 
-                        // Only change isOnline to true if they are currently offline
-                        if (!astro.isOnline) {
-                            astro.isOnline = true;
-                            // Check if they are busy
-                            const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
-                            const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
-                            astro.isAvailable = !activeChat && !activeCall;
-                            await astro.save();
-                            console.log(`🟢 Astrologer ${astro.name} (${astro._id}) is now ONLINE & ${astro.isAvailable ? 'AVAILABLE' : 'BUSY'}`);
-                            
-                            // Broadcast status change to all clients
-                            broadcastAstroStatus(astro._id, astro.isOnline, astro.isAvailable);
-
-                            // Invalidate Redis online listing cache
-                            try {
-                                const { deleteCache } = require("../services/redis.service");
-                                await deleteCache("online_astrologers");
-                            } catch (err) {
-                                console.error("Failed to clear Redis online cache on handleJoinRegistration:", err);
-                            }
+                        // Only auto-flip to online if currently OFFLINE and not manually offline
+                        if (presence.status === "OFFLINE" && astro.manualOffline !== true) {
+                            await transitionStatus(actualAstroId, "ONLINE");
+                        } else {
+                            // Broadcast current presence status to join room to ensure client updates correctly
+                            io.to(`astrologer:${actualAstroId}`).emit("presence:status_changed", {
+                                astrologerId: String(actualAstroId),
+                                status: presence.status,
+                                timestamp: Math.floor(Date.now() / 1000),
+                                version: presence.version,
+                                activeSessionId: presence.activeSessionId
+                            });
                         }
                     }
                 }
@@ -390,6 +447,9 @@ const initSocket = (server) => {
                 let session = null;
                 if (mongoose.Types.ObjectId.isValid(sessionId)) {
                     session = await ChatSession.findById(sessionId).catch(() => null);
+                    if (!session) {
+                        session = await VideoSession.findById(sessionId).catch(() => null);
+                    }
                 }
 
                 const normalizedSenderType = String(senderType || "USER").toUpperCase() === "ASTROLOGER" ? "ASTROLOGER" : "USER";
@@ -434,7 +494,7 @@ const initSocket = (server) => {
                 };
 
                 // Broadcast ONCE using chained .to() so Socket.io automatically deduplicates sockets
-                let emitter = io.to(`session_${cleanSessionId}`).to(cleanSessionId);
+                let emitter = io.to(`session_${cleanSessionId}`).to(`call_${cleanSessionId}`).to(cleanSessionId);
                 if (session) {
                     if (session.user) emitter = emitter.to(`user_${session.user}`);
                     if (session.astrologer) {
@@ -485,23 +545,12 @@ const initSocket = (server) => {
                 session.startTime = new Date();
                 await session.save();
 
-                // Mark astrologer as busy/unavailable in real time
-                const astro = await Astrologer.findById(session.astrologer);
-                if (astro) {
-                    astro.isAvailable = false;
-                    await astro.save();
-                    console.log(`📶 Astrologer ${astro.name} is now BUSY (active chat started via Socket)`);
-                    
-                    // Broadcast status change to all clients
-                    broadcastAstroStatus(astro._id, astro.isOnline, astro.isAvailable);
-
-                    // Invalidate Redis online listing cache
-                    try {
-                        const { deleteCache } = require("../services/redis.service");
-                        await deleteCache("online_astrologers");
-                    } catch (err) {
-                        console.error("Failed to clear Redis online cache on accept_chat_request Socket:", err);
-                    }
+                // Transition status atomically to BUSY
+                try {
+                    const { transitionStatus } = require("../services/presence.service");
+                    await transitionStatus(session.astrologer, "BUSY", session._id);
+                } catch (err) {
+                    console.error("Failed to transition presence status to BUSY in Socket accept_chat_request:", err.message);
                 }
 
                 startBillingTimer(sessionId, io);
@@ -804,50 +853,145 @@ const initSocket = (server) => {
 
         // 6. Mute / Camera Toggle State Sync
         socket.on("media_state_change", (data) => {
-            const sessionId = extractSessionId(data);
-            if (!sessionId) return;
-
-            socket.to(`call_${sessionId}`).emit("peer_media_state_changed", {
+            const roomId = data.sessionId;
+            io.to(`session_${roomId}`)
+              .to(`call_${roomId}`)
+              .to(roomId)
+              .emit("media_state_changed", {
+                sessionId: roomId,
+                userId: data.userId,
                 isAudioMuted: Boolean(data.isAudioMuted),
                 isVideoMuted: Boolean(data.isVideoMuted),
                 senderType: data.senderType
             });
         });
 
+        // ── Real-time Presence Events ──────────────────────────────────────────
+
+        // Heartbeat from astrologer client to refresh TTL
+        socket.on("presence:heartbeat", async () => {
+            if (socket.associatedAstroId) {
+                const astroId = socket.associatedAstroId;
+                const { getPresence, setPresence } = require("../services/presence.service");
+                
+                try {
+                    let presence = await getPresence(astroId);
+                    if (!presence) {
+                        // Recreate presence if expired but socket is still active
+                        const mongoose = require("mongoose");
+                        const Astrologer = mongoose.model("Astrologer");
+                        const astro = await Astrologer.findById(astroId);
+                        const status = (astro && astro.isOnline && !astro.manualOffline) ? "ONLINE" : "OFFLINE";
+                        presence = {
+                            status: status,
+                            connections: 1,
+                            lastHeartbeat: Date.now(),
+                            activeSessionId: null,
+                            timestamp: Date.now(),
+                            version: 1
+                        };
+                        console.log(`♻️ Recreated expired presence for Astrologer ${astro?.name || astroId} on heartbeat (Status: ${status})`);
+                    } else {
+                        presence.lastHeartbeat = Date.now();
+                        if (presence.connections < 1) {
+                            presence.connections = 1;
+                        }
+                    }
+                    await setPresence(astroId, presence);
+                    socket.emit("presence:heartbeat_acknowledged", { timestamp: Date.now() });
+                } catch (err) {
+                    console.error(`Failed to handle heartbeat for astro ${astroId}:`, err.message);
+                }
+            }
+        });
+
+        // User client presence subscription
+        socket.on("presence:subscribe", async (data) => {
+            if (!data) return;
+            const astroIds = Array.isArray(data.astrologerIds) ? data.astrologerIds : [data.astrologerId].filter(Boolean);
+            
+            for (const id of astroIds) {
+                socket.join(`astrologer:${id}`);
+            }
+            console.log(`👤 Socket ${socket.id} subscribed to presence of:`, astroIds);
+
+            // Fetch and send the current presence state of the subscribed astrologers to the client
+            try {
+                const { getPresence } = require("../services/presence.service");
+                const initialPresences = {};
+                for (const id of astroIds) {
+                    const presence = await getPresence(id);
+                    initialPresences[id] = presence ? presence.status : "OFFLINE";
+                }
+                socket.emit("presence:initial_state", { presences: initialPresences });
+            } catch (err) {
+                console.error("Error sending initial presence state to user socket:", err.message);
+            }
+        });
+
+        socket.on("presence:unsubscribe", (data) => {
+            if (!data) return;
+            const astroIds = Array.isArray(data.astrologerIds) ? data.astrologerIds : [data.astrologerId].filter(Boolean);
+            
+            for (const id of astroIds) {
+                socket.leave(`astrologer:${id}`);
+            }
+            console.log(`👤 Socket ${socket.id} unsubscribed from presence of:`, astroIds);
+        });
+
+        // Manual status update request via socket
+        socket.on("presence:status_changed", async (data) => {
+            if (socket.associatedAstroId && data && data.status) {
+                const { transitionStatus } = require("../services/presence.service");
+                try {
+                    await transitionStatus(socket.associatedAstroId, data.status);
+                } catch (err) {
+                    socket.emit("error", { message: err.message });
+                }
+            }
+        });
 
         // Disconnect Handler
         socket.on("disconnect", async () => {
             console.log(`🔌 Socket Disconnected: ${socket.id}`);
             if (socket.associatedAstroId) {
                 const astroId = socket.associatedAstroId;
+                const { getPresence, setPresence, transitionStatus } = require("../services/presence.service");
                 
-                // Use fetchSockets to check if this astrologer has any other open tabs/connections
-                try {
-                    const sockets = await io.in(`user_${astroId}`).fetchSockets();
-                    if (sockets.length === 0) {
-                        const astro = await Astrologer.findById(astroId);
-                        if (astro) {
-                            astro.isOnline = false;
-                            astro.isAvailable = false;
-                            await astro.save();
-                            console.log(`🔴 Astrologer ${astro.name} (${astro._id}) is now OFFLINE`);
-                            
-                            // Broadcast status change to all clients
-                            broadcastAstroStatus(astro._id, astro.isOnline, astro.isAvailable);
+                // Clear any existing disconnect timeout for this astro to reset grace period
+                if (disconnectTimeouts.has(astroId)) {
+                    clearTimeout(disconnectTimeouts.get(astroId));
+                    disconnectTimeouts.delete(astroId);
+                }
 
-                            // Invalidate Redis online listing cache
-                            try {
-                                const { deleteCache } = require("../services/redis.service");
-                                await deleteCache("online_astrologers");
-                            } catch (err) {
-                                console.error("Failed to clear Redis online cache on disconnect:", err);
-                            }
+                try {
+                    let presence = await getPresence(astroId);
+                    if (presence) {
+                        presence.connections = Math.max(0, presence.connections - 1);
+                        await setPresence(astroId, presence);
+
+                        if (presence.connections === 0) {
+                            const gracePeriod = (parseInt(process.env.PRESENCE_DISCONNECT_GRACE_PERIOD) || 5) * 1000;
+                            console.log(`⏳ Astrologer connections reached 0. Starting disconnect grace period of ${gracePeriod / 1000}s for: ${astroId}`);
+                            
+                            const timeoutId = setTimeout(async () => {
+                                disconnectTimeouts.delete(astroId);
+                                try {
+                                    const freshPresence = await getPresence(astroId);
+                                    // Only transition if connections are still 0
+                                    if (!freshPresence || freshPresence.connections === 0) {
+                                        await transitionStatus(astroId, "OFFLINE");
+                                    }
+                                } catch (err) {
+                                    console.error("Error transitioning offline in disconnect grace period:", err.message);
+                                }
+                            }, gracePeriod);
+
+                            disconnectTimeouts.set(astroId, timeoutId);
                         }
-                    } else {
-                        console.log(`📶 Astrologer ${astroId} disconnected one socket, but has ${sockets.length} other connections active.`);
                     }
                 } catch (err) {
-                    console.error("Error updating astrologer offline status on disconnect:", err);
+                    console.error("Error decrementing connections on disconnect:", err.message);
                 }
             }
         });

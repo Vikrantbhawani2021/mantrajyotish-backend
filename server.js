@@ -15,19 +15,24 @@ const { initRedis } = require("./src/config/redis");
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer(app);
-initSocket(server);
 
 const startServer = async () => {
     try {
         // Initialize Redis Connection
         await initRedis();
 
+        // Initialize Socket.io after Redis is connected (so the Redis Adapter can bind)
+        initSocket(server);
+
+        // Start real-time presence verifier background worker
+        const { startPresenceWorker } = require("./src/services/presenceWorker.service");
+        startPresenceWorker(15);
+
+        // Connect to MongoDB
+        await connectDB();
+
         server.listen(PORT, () => {
             console.log(`🚀 Server Running on Port ${PORT} with Socket.io Enabled`);
-        });
-
-        connectDB().catch(err => {
-            console.error("MongoDB connection warning:", err.message);
         });
 
     } catch (error) {

@@ -101,7 +101,10 @@ const normalizeAstroData = async (req) => {
         }
     }
 
-    if (body.isOnline !== undefined && body.isOnline !== null) payload.isOnline = Boolean(body.isOnline);
+    if (body.isOnline !== undefined && body.isOnline !== null) {
+        payload.isOnline = Boolean(body.isOnline);
+        payload.manualOffline = !payload.isOnline;
+    }
     if (body.isAvailable !== undefined && body.isAvailable !== null) payload.isAvailable = Boolean(body.isAvailable);
 
     const strengths = body.selectedStrengths || body.strengths;

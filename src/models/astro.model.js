@@ -160,6 +160,11 @@ const AstroSchema = new mongoose.Schema(
             default: false
         },
 
+        manualOffline: {
+            type: Boolean,
+            default: true
+        },
+
         isAvailable: {
             type: Boolean,
             default: true

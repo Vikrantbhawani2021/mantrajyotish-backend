@@ -169,21 +169,12 @@ const acceptCallSession = async (sessionId) => {
     if (!session.startTime) session.startTime = new Date();
     await session.save();
 
-    // Mark astrologer as busy/unavailable in real time
-    const Astrologer = require("../models/astro.model");
-    const astro = await Astrologer.findById(session.astrologer);
-    if (astro) {
-        astro.isAvailable = false;
-        await astro.save();
-        console.log(`📶 Astrologer ${astro.name} is now BUSY (active call started)`);
-        
-        // Invalidate Redis online listing cache
-        try {
-            const { deleteCache } = require("./redis.service");
-            await deleteCache("online_astrologers");
-        } catch (err) {
-            console.error("Failed to clear Redis online cache on acceptCallSession:", err);
-        }
+    // Transition status atomically to BUSY
+    try {
+        const { transitionStatus } = require("./presence.service");
+        await transitionStatus(session.astrologer, "BUSY", session._id);
+    } catch (err) {
+        console.error("Failed to transition presence status to BUSY in acceptCallSession:", err.message);
     }
 
     const updatedSession = await VideoSession.findById(session._id)
@@ -227,6 +218,11 @@ const endCallSession = async (sessionId) => {
         });
     }
     if (!session) throw new Error("Call session not found");
+
+    if (session.status === "COMPLETED" || session.status === "CANCELLED" || session.status === "REJECTED") {
+        console.log(`ℹ️ Call session ${sessionId} is already ${session.status}. Skipping re-end calculations.`);
+        return session;
+    }
 
     const endTime = new Date();
     const startTime = session.startTime;
@@ -294,31 +290,20 @@ const endCallSession = async (sessionId) => {
         if (astro) {
             const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
             const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } });
-            astro.isAvailable = !activeChat && !activeCall;
-            await astro.save();
-            console.log(`📶 Astrologer ${astro.name} availability updated: ${astro.isAvailable ? 'AVAILABLE' : 'BUSY'}`);
             
-            // Invalidate Redis online listing cache
-            try {
-                const { deleteCache } = require("./redis.service");
-                await deleteCache("online_astrologers");
-            } catch (err) {
-                console.error("Failed to clear Redis online cache on endCallSession:", err);
-            }
-
-            // Broadcast status change to all clients
-            try {
-                const { getIO } = require("../config/socket");
-                const io = getIO();
-                if (io) {
-                    io.emit("astrologer_status_changed", {
-                        astrologerId: String(astro._id),
-                        isOnline: Boolean(astro.isOnline),
-                        isAvailable: Boolean(astro.isAvailable)
-                    });
-                }
-            } catch (socketErr) {
-                console.error("Failed to emit status change event on endCallSession:", socketErr);
+            if (activeChat || activeCall) {
+                // Keep BUSY if another session is active
+                astro.isAvailable = false;
+                await astro.save();
+            } else {
+                // No other active sessions. Check if socket connections still exist to determine ONLINE or OFFLINE
+                const { getPresence, transitionStatus } = require("./presence.service");
+                const presence = await getPresence(astro._id);
+                const hasConnections = presence && presence.connections > 0;
+                const nextStatus = hasConnections ? "ONLINE" : "OFFLINE";
+                
+                await transitionStatus(astro._id, nextStatus);
+                console.log(`📶 Astrologer ${astro.name} presence transitioned to ${nextStatus} on call session end`);
             }
         }
     } catch (e) {

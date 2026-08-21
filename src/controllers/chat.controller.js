@@ -2,6 +2,7 @@ const ChatSession = require("../models/chatSession.model");
 const ChatMessage = require("../models/chatMessage.model");
 const User = require("../models/user.model");
 const Astrologer = require("../models/astro.model");
+const VideoSession = require("../models/videoSession.model");
 const { startBillingTimer, stopBillingTimer } = require("../services/chatBilling.service");
 
 const getSessionIdFromBodyOrParams = (req) => {
@@ -230,21 +231,12 @@ exports.acceptChat = async (req, res, next) => {
         if (!session.startTime) session.startTime = new Date();
         await session.save();
 
-        // Mark astrologer as busy/unavailable in real time
-        const Astrologer = require("../models/astro.model");
-        const astro = await Astrologer.findById(session.astrologer);
-        if (astro) {
-            astro.isAvailable = false;
-            await astro.save();
-            console.log(`📶 Astrologer ${astro.name} is now BUSY (active chat started via REST API)`);
-            
-            // Invalidate Redis online listing cache
-            try {
-                const { deleteCache } = require("../services/redis.service");
-                await deleteCache("online_astrologers");
-            } catch (err) {
-                console.error("Failed to clear Redis online cache on acceptChat REST:", err);
-            }
+        // Transition status atomically to BUSY
+        try {
+            const { transitionStatus } = require("../services/presence.service");
+            await transitionStatus(session.astrologer, "BUSY", session._id);
+        } catch (err) {
+            console.error("Failed to transition presence status to BUSY in REST acceptChat:", err.message);
         }
 
         // Start per-minute billing recurring timer
@@ -446,6 +438,9 @@ exports.sendMessage = async (req, res, next) => {
         let session = null;
         if (mongoose.Types.ObjectId.isValid(cleanSessionId)) {
             session = await ChatSession.findById(cleanSessionId).catch(() => null);
+            if (!session) {
+                session = await VideoSession.findById(cleanSessionId).catch(() => null);
+            }
         }
 
         const normalizedSenderType = String(senderType || "USER").toUpperCase() === "ASTROLOGER" ? "ASTROLOGER" : "USER";
@@ -494,7 +489,7 @@ exports.sendMessage = async (req, res, next) => {
             const io = getIO();
             if (io) {
                 // Broadcast ONCE using chained .to() so Socket.io automatically deduplicates sockets
-                let emitter = io.to(`session_${cleanSessionId}`).to(cleanSessionId);
+                let emitter = io.to(`session_${cleanSessionId}`).to(`call_${cleanSessionId}`).to(cleanSessionId);
                 if (session) {
                     if (session.user) emitter = emitter.to(`user_${session.user}`);
                     if (session.astrologer) {
