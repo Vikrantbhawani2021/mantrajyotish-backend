@@ -5,7 +5,7 @@ const Otp = require("../models/otp.model");
 const fast2smsService = require("../services/fast2sms.service");
 const astroInterviewService = require("../services/astroInterview.service");
 const bcrypt = require("bcrypt");
-const { generateToken } = require("../utils/jwt");
+const { generateToken, generateRefreshToken } = require("../utils/jwt");
 
 // 1. REGISTER ASTROLOGER
 exports.createAstrologerLogin = async (req, res) => {
@@ -83,11 +83,16 @@ exports.createAstrologerLogin = async (req, res) => {
             userId: astrologer._id,
             role: "astrologer"
         });
+        const refreshToken = generateRefreshToken({
+            userId: astrologer._id,
+            role: "astrologer"
+        });
 
         return res.status(201).json({
             success: true,
             message: "Astrologer registered successfully",
             token,
+            refreshToken,
             astrologer
         });
 
@@ -198,11 +203,16 @@ exports.loginAstrologer = async (req, res) => {
             userId: astrologer._id,
             role: "astrologer"
         });
+        const refreshToken = generateRefreshToken({
+            userId: astrologer._id,
+            role: "astrologer"
+        });
 
         return res.status(200).json({
             success: true,
             message: "Login successful",
             token,
+            refreshToken,
             astrologer
         });
 

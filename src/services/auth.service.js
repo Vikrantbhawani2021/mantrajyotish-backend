@@ -2,7 +2,7 @@ const User = require("../models/user.model");
 const UserLogin = require("../models/userLogin.model");
 const Otp = require("../models/otp.model");
 const fast2smsService = require("./fast2sms.service");
-const { generateToken } = require("../utils/jwt");
+const { generateToken, generateRefreshToken, verifyRefreshToken } = require("../utils/jwt");
 
 /**
  * Send OTP via Fast2SMS
@@ -96,14 +96,54 @@ const verifyOtp = async (phone, otp) => {
         userId: user._id,
         role: user.role
     });
+    const refreshToken = generateRefreshToken({
+        userId: user._id,
+        role: user.role
+    });
 
     return {
         user,
-        token
+        token,
+        refreshToken
     };
+};
+
+/**
+ * Refresh access token using refresh token
+ * @param {string} tokenStr - Refresh token
+ */
+const refresh = async (tokenStr) => {
+    try {
+        const decoded = verifyRefreshToken(tokenStr);
+        if (!decoded || !decoded.userId) {
+            throw new Error("Invalid token payload");
+        }
+
+        const user = await User.findById(decoded.userId);
+        if (!user) {
+            throw new Error("User not found");
+        }
+
+        const token = generateToken({
+            userId: user._id,
+            role: user.role
+        });
+        const refreshToken = generateRefreshToken({
+            userId: user._id,
+            role: user.role
+        });
+
+        return {
+            token,
+            refreshToken
+        };
+    } catch (error) {
+        throw new Error(error.message || "Failed to refresh token");
+    }
 };
 
 module.exports = {
     sendOtp,
-    verifyOtp
+    verifyOtp,
+    refresh
 };
