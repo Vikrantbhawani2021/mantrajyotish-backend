@@ -854,16 +854,22 @@ const initSocket = (server) => {
         // 6. Mute / Camera Toggle State Sync
         socket.on("media_state_change", (data) => {
             const roomId = data.sessionId;
-            socket.broadcast.to(`session_${roomId}`)
-              .to(`call_${roomId}`)
-              .to(roomId)
-              .emit("media_state_changed", {
+            const payload = {
                 sessionId: roomId,
                 userId: data.userId,
                 isAudioMuted: Boolean(data.isAudioMuted),
                 isVideoMuted: Boolean(data.isVideoMuted),
                 senderType: data.senderType
-            });
+            };
+            socket.broadcast.to(`session_${roomId}`)
+              .to(`call_${roomId}`)
+              .to(roomId)
+              .emit("media_state_changed", payload);
+
+            socket.broadcast.to(`session_${roomId}`)
+              .to(`call_${roomId}`)
+              .to(roomId)
+              .emit("peer_media_state_changed", payload);
         });
 
         // ── Real-time Presence Events ──────────────────────────────────────────

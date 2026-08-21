@@ -288,6 +288,12 @@ const endCallSession = async (sessionId) => {
         const ChatSession = require("../models/chatSession.model");
         const astro = await Astrologer.findById(session.astrologer);
         if (astro) {
+            // Clean up any stale active video call sessions first
+            await VideoSession.updateMany(
+                { astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } },
+                { $set: { status: "COMPLETED", endTime: new Date() } }
+            );
+
             const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
             const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } });
             
@@ -299,11 +305,14 @@ const endCallSession = async (sessionId) => {
                 // No other active sessions. Check if socket connections still exist to determine ONLINE or OFFLINE
                 const { getPresence, transitionStatus } = require("./presence.service");
                 const presence = await getPresence(astro._id);
-                const hasConnections = presence && presence.connections > 0;
-                const nextStatus = hasConnections ? "ONLINE" : "OFFLINE";
-                
-                await transitionStatus(astro._id, nextStatus);
-                console.log(`📶 Astrologer ${astro.name} presence transitioned to ${nextStatus} on call session end`);
+                if (!presence || presence.status !== "OFFLINE") {
+                    await transitionStatus(astro._id, "ONLINE");
+                    console.log(`🔄 Restored Astrologer ${astro._id} status to ONLINE on call end.`);
+                } else {
+                    astro.isOnline = false;
+                    astro.isAvailable = false;
+                    await astro.save();
+                }
             }
         }
     } catch (e) {
