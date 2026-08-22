@@ -127,12 +127,20 @@ const transitionStatus = async (astrologerId, nextStatus, sessionId = null) => {
             const isOnline = (nextStatus === "ONLINE" || nextStatus === "BUSY");
             const isAvailable = (nextStatus === "ONLINE");
             
+            const updateFields = {
+                isOnline,
+                isAvailable
+            };
+
+            // Only clear manualOffline when going online.
+            // Do not set manualOffline to true when a socket disconnects naturally,
+            // as this is a connection-based offline state, not a user-initiated opt-out.
+            if (nextStatus === "ONLINE") {
+                updateFields.manualOffline = false;
+            }
+            
             await Astrologer.findByIdAndUpdate(astrologerId, {
-                $set: {
-                    isOnline,
-                    isAvailable,
-                    manualOffline: (nextStatus === "OFFLINE")
-                }
+                $set: updateFields
             });
         } catch (dbErr) {
             console.error(`MongoDB sync error during presence transition for ${astrologerId}:`, dbErr);
