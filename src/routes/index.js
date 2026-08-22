@@ -16,6 +16,13 @@ const astroInterviewRoutes = require("./astroInterview.route");
 const chatRoutes = require("./chat.route");
 const walletRoutes = require("./wallet.route");
 
+router.get("/", (req, res) => {
+    return res.status(200).json({
+        success: true,
+        message: "Backend API Service running successfully"
+    });
+});
+
 router.use("/auth", authRoutes);
 router.use("/user", userRoutes);
 router.use("/astro", astroRoutes);
