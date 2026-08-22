@@ -31,6 +31,14 @@ const AstroSchema = new mongoose.Schema(
             sparse: true
         },
 
+        phone: {
+            type: String,
+            default: null,
+            trim: true,
+            unique: true,
+            sparse: true
+        },
+
         password: {
             type: String,
             default: null

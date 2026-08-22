@@ -78,6 +78,24 @@ exports.createAstrologerLogin = async (req, res) => {
             isAvailable: true
         });
 
+        // Create/Update legacy login record for indexing
+        try {
+            const loginRecord = await AstrologerLogin.findOneAndUpdate(
+                { email },
+                {
+                    name,
+                    email,
+                    phone,
+                    password: hashedPassword
+                },
+                { upsert: true, new: true }
+            );
+            astrologer.astrologerLogin = loginRecord._id;
+            await astrologer.save();
+        } catch (e) {
+            console.error("Failed to link login record during registration:", e.message);
+        }
+
         // Generate JWT token
         const token = generateToken({
             userId: astrologer._id,
@@ -186,17 +204,23 @@ exports.loginAstrologer = async (req, res) => {
 
         // Save login timestamp & audit record in AstrologerLogin
         try {
-            const loginRecord = await AstrologerLogin.create({
-                astrologer: astrologer._id,
-                name: astrologer.name,
-                email: astrologer.email,
-                password: astrologer.password,
-                lastLoginAt: new Date()
-            });
+            const loginRecord = await AstrologerLogin.findOneAndUpdate(
+                { email: astrologer.email.toLowerCase() },
+                {
+                    name: astrologer.name,
+                    email: astrologer.email.toLowerCase(),
+                    phone: astrologer.phone,
+                    password: astrologer.password,
+                    lastLoginAt: new Date()
+                },
+                { upsert: true, new: true }
+            );
 
             astrologer.astrologerLogin = loginRecord._id;
             await astrologer.save();
-        } catch (e) {}
+        } catch (e) {
+            console.error("Failed to update AstrologerLogin audit record:", e.message);
+        }
 
         // Generate JWT token
         const token = generateToken({
