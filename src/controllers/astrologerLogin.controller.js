@@ -286,7 +286,7 @@ exports.forgotPasswordSendOtp = async (req, res) => {
                 targetPhone,
                 otp: customOtp,
                 smsStatus: smsResult,
-                emailStatus: emailResult
+                emailStatus: null
             }
         });
 
@@ -332,16 +332,21 @@ exports.forgotPasswordReset = async (req, res) => {
             });
         }
 
+        const targetEmail = astrologer.email ? astrologer.email.toLowerCase() : (identifier.includes("@") ? identifier.toLowerCase() : null);
         const targetPhone = astrologer.phone || identifier;
 
         let isVerified = false;
 
         // Check local DB Otp model (phone or email key)
+        const queryParams = [
+            { phone: targetPhone, otp }
+        ];
+        if (targetEmail) {
+            queryParams.push({ phone: targetEmail, otp });
+        }
+
         const existingOtp = await Otp.findOne({
-            $or: [
-                { phone: targetPhone, otp },
-                { phone: targetEmail, otp }
-            ]
+            $or: queryParams
         });
 
         if (existingOtp) {
