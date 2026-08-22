@@ -92,9 +92,6 @@ const findUserByIdOrRef = async (id) => {
             ]
         });
     }
-    if (!user) {
-        user = await User.findOne().sort({ createdAt: -1 });
-    }
     return user;
 };
 
