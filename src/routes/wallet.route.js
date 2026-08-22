@@ -403,6 +403,19 @@ router.get("/transactions", async (req, res) => {
         const Payment = require("../models/payment.model");
         const Payout = require("../models/payout.model");
 
+        const formatKolkataDate = (dateVal) => {
+            if (!dateVal) return "Not Specified";
+            return new Date(dateVal).toLocaleString("en-GB", {
+                timeZone: "Asia/Kolkata",
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true
+            });
+        };
+
         const txns = [];
 
         if (astrologer) {
@@ -429,14 +442,26 @@ router.get("/transactions", async (req, res) => {
                     txns.push({
                         id: String(s._id),
                         transactionId: String(s._id),
+                        sessionCode: s.sessionCode || String(s._id),
                         title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
-                        description: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
-                        paymentMethod: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${clientName}`,
-                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        description: `Session Code: ${s.sessionCode || String(s._id)} | Duration: ${s.totalDurationMinutes || 0} mins`,
+                        paymentMethod: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call`,
+                        date: formatKolkataDate(s.startTime || s.createdAt),
+                        createdAt: s.startTime || s.createdAt,
                         amount: s.astrologerEarnings,
                         status: "Completed",
-                        type: "credit"
+                        type: "credit",
+                        details: {
+                            sessionId: String(s._id),
+                            sessionCode: s.sessionCode || String(s._id),
+                            durationMinutes: s.totalDurationMinutes || 0,
+                            durationSeconds: s.totalDurationSeconds || 0,
+                            startTime: s.startTime ? formatKolkataDate(s.startTime) : null,
+                            endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
+                            perMinuteRate: s.perMinuteRate || 0,
+                            totalAmountDeducted: s.totalAmountDeducted || 0,
+                            astrologerEarnings: s.astrologerEarnings || 0
+                        }
                     });
                 }
             });
@@ -447,14 +472,26 @@ router.get("/transactions", async (req, res) => {
                     txns.push({
                         id: String(s._id),
                         transactionId: String(s._id),
+                        sessionCode: s.sessionCode || String(s._id),
                         title: `Chat with ${clientName}`,
-                        description: `Chat with ${clientName}`,
-                        paymentMethod: `Chat with ${clientName}`,
-                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        description: `Session Code: ${s.sessionCode || String(s._id)} | Duration: ${s.totalDurationMinutes || 0} mins`,
+                        paymentMethod: `Chat Session`,
+                        date: formatKolkataDate(s.startTime || s.createdAt),
+                        createdAt: s.startTime || s.createdAt,
                         amount: s.astrologerEarnings,
                         status: "Completed",
-                        type: "credit"
+                        type: "credit",
+                        details: {
+                            sessionId: String(s._id),
+                            sessionCode: s.sessionCode || String(s._id),
+                            durationMinutes: s.totalDurationMinutes || 0,
+                            durationSeconds: s.totalDurationSeconds || 0,
+                            startTime: s.startTime ? formatKolkataDate(s.startTime) : null,
+                            endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
+                            perMinuteRate: s.perMinuteRate || 0,
+                            totalAmountDeducted: s.totalAmountDeducted || 0,
+                            astrologerEarnings: s.astrologerEarnings || 0
+                        }
                     });
                 }
             });
@@ -467,7 +504,7 @@ router.get("/transactions", async (req, res) => {
                     title: methodStr,
                     description: methodStr,
                     paymentMethod: methodStr,
-                    date: new Date(p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                    date: formatKolkataDate(p.createdAt),
                     createdAt: p.createdAt,
                     amount: p.amount,
                     status: p.status,
@@ -493,12 +530,25 @@ router.get("/transactions", async (req, res) => {
                     txns.push({
                         id: String(s._id),
                         transactionId: String(s._id),
+                        sessionCode: s.sessionCode || String(s._id),
                         title: `${s.callType === "VIDEO" ? "Video" : "Audio"} Call with ${s.astrologer?.name || "Astrologer"}`,
-                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        description: `Session Code: ${s.sessionCode || String(s._id)} | Duration: ${s.totalDurationMinutes || 0} mins`,
+                        date: formatKolkataDate(s.startTime || s.createdAt),
+                        createdAt: s.startTime || s.createdAt,
                         amount: s.totalAmountDeducted,
                         status: "Completed",
-                        type: "debit"
+                        type: "debit",
+                        details: {
+                            sessionId: String(s._id),
+                            sessionCode: s.sessionCode || String(s._id),
+                            durationMinutes: s.totalDurationMinutes || 0,
+                            durationSeconds: s.totalDurationSeconds || 0,
+                            startTime: s.startTime ? formatKolkataDate(s.startTime) : null,
+                            endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
+                            perMinuteRate: s.perMinuteRate || 0,
+                            totalAmountDeducted: s.totalAmountDeducted || 0,
+                            astrologerEarnings: s.astrologerEarnings || 0
+                        }
                     });
                 }
             });
@@ -508,12 +558,25 @@ router.get("/transactions", async (req, res) => {
                     txns.push({
                         id: String(s._id),
                         transactionId: String(s._id),
+                        sessionCode: s.sessionCode || String(s._id),
                         title: `Chat with ${s.astrologer?.name || "Astrologer"}`,
-                        date: new Date(s.updatedAt || s.endTime || s.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
-                        createdAt: s.updatedAt || s.endTime || s.createdAt,
+                        description: `Session Code: ${s.sessionCode || String(s._id)} | Duration: ${s.totalDurationMinutes || 0} mins`,
+                        date: formatKolkataDate(s.startTime || s.createdAt),
+                        createdAt: s.startTime || s.createdAt,
                         amount: s.totalAmountDeducted,
                         status: "Completed",
-                        type: "debit"
+                        type: "debit",
+                        details: {
+                            sessionId: String(s._id),
+                            sessionCode: s.sessionCode || String(s._id),
+                            durationMinutes: s.totalDurationMinutes || 0,
+                            durationSeconds: s.totalDurationSeconds || 0,
+                            startTime: s.startTime ? formatKolkataDate(s.startTime) : null,
+                            endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
+                            perMinuteRate: s.perMinuteRate || 0,
+                            totalAmountDeducted: s.totalAmountDeducted || 0,
+                            astrologerEarnings: s.astrologerEarnings || 0
+                        }
                     });
                 }
             });
@@ -527,7 +590,7 @@ router.get("/transactions", async (req, res) => {
                             id: String(p._id),
                             transactionId: p.transactionId || String(p._id),
                             title: p.appointment ? `Payment for appointment` : `Added Money`,
-                            date: new Date(p.paidAt || p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                            date: formatKolkataDate(p.paidAt || p.createdAt),
                             createdAt: p.paidAt || p.createdAt,
                             amount: p.amount,
                             status: "Success",
@@ -543,7 +606,7 @@ router.get("/transactions", async (req, res) => {
                             id: String(p._id),
                             transactionId: p.transactionId || String(p._id),
                             title: `Failed Payment`,
-                            date: new Date(p.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+                            date: formatKolkataDate(p.createdAt),
                             createdAt: p.createdAt,
                             amount: p.amount,
                             status: "Failed",

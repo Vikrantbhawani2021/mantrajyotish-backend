@@ -101,6 +101,23 @@ const normalizeAstroData = async (req) => {
         }
     }
 
+    const parsePrice = (val) => {
+        if (val === undefined || val === null) return undefined;
+        const parsed = typeof val === "string" 
+            ? Number(String(val).replace(/[^0-9.]/g, "")) 
+            : Number(val);
+        return isNaN(parsed) ? undefined : parsed;
+    };
+
+    const chatPrice = parsePrice(body.chatPrice !== undefined ? body.chatPrice : body.chatRate);
+    if (chatPrice !== undefined) payload.chatPrice = chatPrice;
+
+    const audioCallPrice = parsePrice(body.audioCallPrice !== undefined ? body.audioCallPrice : (body.audioCallRate !== undefined ? body.audioCallRate : (body.audioRate !== undefined ? body.audioRate : body.callRate)));
+    if (audioCallPrice !== undefined) payload.audioCallPrice = audioCallPrice;
+
+    const videoCallPrice = parsePrice(body.videoCallPrice !== undefined ? body.videoCallPrice : (body.videoCallRate !== undefined ? body.videoCallRate : body.videoRate));
+    if (videoCallPrice !== undefined) payload.videoCallPrice = videoCallPrice;
+
     if (body.isOnline !== undefined && body.isOnline !== null) {
         payload.isOnline = Boolean(body.isOnline);
         payload.manualOffline = !payload.isOnline;

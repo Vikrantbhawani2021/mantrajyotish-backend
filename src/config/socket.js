@@ -292,7 +292,47 @@ const initSocket = (server) => {
                     return;
                 }
 
-                const perMinuteRate = astroObj.consultationFee || 0;
+                // Check if there is currently a PENDING chat request to prioritize based on wallet balance
+                const pendingSession = await ChatSession.findOne({
+                    astrologer: astroObj._id,
+                    status: "PENDING"
+                }).populate("user");
+
+                if (pendingSession) {
+                    const existingUser = pendingSession.user;
+                    const existingWallet = existingUser ? (existingUser.walletBalance || 0) : 0;
+                    const newWallet = userObj.walletBalance || 0;
+
+                    if (newWallet > existingWallet) {
+                        // Cancel the existing pending session
+                        pendingSession.status = "CANCELLED";
+                        pendingSession.rejectionReason = "Prioritized chat with higher wallet balance.";
+                        await pendingSession.save();
+
+                        // Notify the previous user via socket
+                        try {
+                            const cancelPayload = {
+                                sessionId: pendingSession._id,
+                                status: "CANCELLED",
+                                message: "Your chat request was cancelled because another user with a higher wallet balance requested a consultation."
+                            };
+                            io.to(`session_${pendingSession._id}`).emit("chat_ended", cancelPayload);
+                            if (pendingSession.user) {
+                                io.to(`user_${pendingSession.user._id}`).emit("chat_ended", cancelPayload);
+                            }
+                        } catch (socketErr) {
+                            console.error("Failed to emit chat_ended for replaced session:", socketErr.message);
+                        }
+                        console.log(`🔄 Prioritized chat: Replaced pending chat session ${pendingSession._id} (User balance: ₹${existingWallet}) with new request from User ${userObj._id} (User balance: ₹${newWallet})`);
+                    } else {
+                        socket.emit("error", { message: "Astrologer is currently receiving another chat request. Please try again in a moment." });
+                        return;
+                    }
+                }
+
+                const perMinuteRate = astroObj.chatPrice !== undefined && astroObj.chatPrice !== null
+                    ? astroObj.chatPrice
+                    : (astroObj.consultationFee || 20);
                 const minBalanceRequired = perMinuteRate * 2;
 
                 if ((userObj.walletBalance || 0) < minBalanceRequired) {

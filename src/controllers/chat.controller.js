@@ -93,7 +93,9 @@ exports.initiateChat = async (req, res, next) => {
             });
         }
 
-        const perMinuteRate = astrologer.consultationFee || 0;
+        const perMinuteRate = astrologer.chatPrice !== undefined && astrologer.chatPrice !== null
+            ? astrologer.chatPrice
+            : (astrologer.consultationFee || 20);
         const minBalanceRequired = perMinuteRate * 2;
 
         if ((user.walletBalance || 0) < minBalanceRequired) {

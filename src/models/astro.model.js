@@ -113,6 +113,24 @@ const AstroSchema = new mongoose.Schema(
             min: 0
         },
 
+        chatPrice: {
+            type: Number,
+            default: 20,
+            min: 0
+        },
+
+        audioCallPrice: {
+            type: Number,
+            default: 25,
+            min: 0
+        },
+
+        videoCallPrice: {
+            type: Number,
+            default: 40,
+            min: 0
+        },
+
         consultationMode: {
             type: [String],
             enum: ["chat", "call", "video"],

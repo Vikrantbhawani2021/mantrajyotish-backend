@@ -80,7 +80,62 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
         throw new Error("Astrologer is busy with another consultation.");
     }
 
-    const perMinuteRate = astrologer.consultationFee || 0;
+    // Check if there is currently a PENDING call request to prioritize based on wallet balance
+    const pendingSession = await VideoSession.findOne({
+        astrologer: astrologer._id,
+        status: "PENDING"
+    }).populate("user");
+
+    if (pendingSession) {
+        const existingUser = pendingSession.user;
+        const existingWallet = existingUser ? (existingUser.walletBalance || 0) : 0;
+        const newWallet = user.walletBalance || 0;
+
+        if (newWallet > existingWallet) {
+            // Cancel the existing pending session
+            pendingSession.status = "CANCELLED";
+            pendingSession.rejectionReason = "Prioritized call with higher wallet balance.";
+            await pendingSession.save();
+
+            // Notify the previous user via socket
+            try {
+                const { getIO } = require("../config/socket");
+                const io = getIO();
+                if (io) {
+                    const cancelPayload = {
+                        sessionId: pendingSession._id,
+                        callId: pendingSession._id,
+                        status: "CANCELLED",
+                        message: "Your call request was cancelled because another user with a higher wallet balance requested a consultation."
+                    };
+                    io.to(`call_${pendingSession._id}`).emit("call_ended", cancelPayload);
+                    if (pendingSession.user) {
+                        io.to(`user_${pendingSession.user._id}`).emit("call_ended", cancelPayload);
+                    }
+                }
+            } catch (socketErr) {
+                console.error("Failed to emit call_ended for replaced session:", socketErr.message);
+            }
+            console.log(`🔄 Prioritized call: Replaced pending session ${pendingSession._id} (User balance: ₹${existingWallet}) with new request from User ${user._id} (User balance: ₹${newWallet})`);
+        } else {
+            throw new Error("Astrologer is currently receiving another call request. Please try again in a moment.");
+        }
+    }
+
+    const typeStr = String(callType).toUpperCase();
+    const normalizedCallType = (typeStr === "AUDIO" || typeStr === "CALL" || typeStr === "VOICE" || typeStr === "PHONE") ? "AUDIO" : "VIDEO";
+
+    // Set dynamic rate based on call type
+    let perMinuteRate;
+    if (normalizedCallType === "AUDIO") {
+        perMinuteRate = astrologer.audioCallPrice !== undefined && astrologer.audioCallPrice !== null
+            ? astrologer.audioCallPrice
+            : (astrologer.consultationFee || 25);
+    } else {
+        perMinuteRate = astrologer.videoCallPrice !== undefined && astrologer.videoCallPrice !== null
+            ? astrologer.videoCallPrice
+            : (astrologer.consultationFee || 40);
+    }
 
     // Ensure DB user wallet balance is healthy (at least ₹1000 or client balance)
     const effectiveBal = Math.max(user.walletBalance || 0, Number(walletBalance) || 0, 1000);
@@ -88,9 +143,6 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
         user.walletBalance = effectiveBal;
         await user.save();
     }
-
-    const typeStr = String(callType).toUpperCase();
-    const normalizedCallType = (typeStr === "AUDIO" || typeStr === "CALL" || typeStr === "VOICE" || typeStr === "PHONE") ? "AUDIO" : "VIDEO";
 
     // Cancel/End any older pending/active/live call sessions for this user/astrologer so they don't block/reuse channels
     await VideoSession.updateMany(
