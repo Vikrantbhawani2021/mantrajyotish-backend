@@ -30,7 +30,10 @@ const startBillingTimer = (sessionId, io) => {
                 return;
             }
 
-            const rate = session.perMinuteRate || 10;
+            // Flat rate of 9 Rupees per minute for all chats
+            const rate = 9;
+            const astroEarnings = parseFloat((rate * 0.60).toFixed(2));
+            const platFee = parseFloat((rate * 0.40).toFixed(2));
 
             // If user has insufficient balance, end the chat session
             if ((user.walletBalance || 0) < rate) {
@@ -50,11 +53,22 @@ const startBillingTimer = (sessionId, io) => {
 
             // Normal 1-minute deduction
             user.walletBalance = parseFloat((user.walletBalance - rate).toFixed(2));
-            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + rate).toFixed(2));
+            
+            // Add 60% to astrologer wallet balance
+            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + astroEarnings).toFixed(2));
+
+            // Add 40% to admin wallet balance for company profit
+            const Admin = require("../models/admin.model");
+            const adminObj = await Admin.findOne();
+            if (adminObj) {
+                adminObj.walletBalance = parseFloat(((adminObj.walletBalance || 0) + platFee).toFixed(2));
+                await adminObj.save();
+            }
 
             session.totalDurationMinutes += 1;
             session.totalAmountDeducted = parseFloat(((session.totalAmountDeducted || 0) + rate).toFixed(2));
-            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + rate).toFixed(2));
+            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + astroEarnings).toFixed(2));
+            session.platformFee = parseFloat(((session.platformFee || 0) + platFee).toFixed(2));
 
             await user.save();
             await astrologer.save();
@@ -123,10 +137,13 @@ const endChatSession = async (sessionId) => {
         if (startTime) {
             const durationMs = endTime.getTime() - new Date(startTime).getTime();
             durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
-            const ratePerMin = session.perMinuteRate || 20;
+            const ratePerMin = 9; // Flat 9 Rupees per minute
             const ratePerSec = ratePerMin / 60;
             expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
         }
+
+        const expectedAstroEarnings = parseFloat((expectedCost * 0.60).toFixed(2));
+        const expectedPlatFee = parseFloat((expectedCost * 0.40).toFixed(2));
 
         session.status = "COMPLETED";
         session.endTime = endTime;
@@ -147,19 +164,31 @@ const endChatSession = async (sessionId) => {
                     const prevUserBalance = user.walletBalance || 0;
                     user.walletBalance = Math.max(0, parseFloat((prevUserBalance - difference).toFixed(2)));
                     
-                    // Add earnings to astrologer wallet
+                    // Add 60% earnings difference to astrologer wallet
+                    const astroDiff = parseFloat((expectedAstroEarnings - (session.astrologerEarnings || 0)).toFixed(2));
                     const prevAstroBalance = astrologer.walletBalance || 0;
-                    astrologer.walletBalance = parseFloat((prevAstroBalance + difference).toFixed(2));
+                    astrologer.walletBalance = parseFloat((prevAstroBalance + astroDiff).toFixed(2));
+
+                    // Add 40% platform fee difference to admin wallet for company profit
+                    const platDiff = parseFloat((expectedPlatFee - (session.platformFee || 0)).toFixed(2));
+                    const Admin = require("../models/admin.model");
+                    const adminObj = await Admin.findOne();
+                    if (adminObj) {
+                        adminObj.walletBalance = parseFloat(((adminObj.walletBalance || 0) + platDiff).toFixed(2));
+                        await adminObj.save();
+                    }
                     
                     session.totalAmountDeducted = expectedCost;
-                    session.astrologerEarnings = expectedCost;
+                    session.astrologerEarnings = expectedAstroEarnings;
+                    session.platformFee = expectedPlatFee;
                     
                     await user.save();
                     await astrologer.save();
-                    console.log(`💰 [Chat Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${difference}. Full cost: ₹${expectedCost}`);
+                    console.log(`💰 [Chat Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${astroDiff}. Company Profit: ₹${platDiff}. Full cost: ₹${expectedCost}`);
                 } else {
                     session.totalAmountDeducted = Math.max(session.totalAmountDeducted || 0, expectedCost);
-                    session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedCost);
+                    session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedAstroEarnings);
+                    session.platformFee = Math.max(session.platformFee || 0, expectedPlatFee);
                 }
             }
         } catch (billingErr) {

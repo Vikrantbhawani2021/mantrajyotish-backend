@@ -460,7 +460,8 @@ router.get("/transactions", async (req, res) => {
                             endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
                             perMinuteRate: s.perMinuteRate || 0,
                             totalAmountDeducted: s.totalAmountDeducted || 0,
-                            astrologerEarnings: s.astrologerEarnings || 0
+                            astrologerEarnings: s.astrologerEarnings || 0,
+                            platformFee: s.platformFee || 0
                         }
                     });
                 }
@@ -490,7 +491,8 @@ router.get("/transactions", async (req, res) => {
                             endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
                             perMinuteRate: s.perMinuteRate || 0,
                             totalAmountDeducted: s.totalAmountDeducted || 0,
-                            astrologerEarnings: s.astrologerEarnings || 0
+                            astrologerEarnings: s.astrologerEarnings || 0,
+                            platformFee: s.platformFee || 0
                         }
                     });
                 }
@@ -547,7 +549,8 @@ router.get("/transactions", async (req, res) => {
                             endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
                             perMinuteRate: s.perMinuteRate || 0,
                             totalAmountDeducted: s.totalAmountDeducted || 0,
-                            astrologerEarnings: s.astrologerEarnings || 0
+                            astrologerEarnings: s.astrologerEarnings || 0,
+                            platformFee: s.platformFee || 0
                         }
                     });
                 }
@@ -575,7 +578,8 @@ router.get("/transactions", async (req, res) => {
                             endTime: s.endTime ? formatKolkataDate(s.endTime) : null,
                             perMinuteRate: s.perMinuteRate || 0,
                             totalAmountDeducted: s.totalAmountDeducted || 0,
-                            astrologerEarnings: s.astrologerEarnings || 0
+                            astrologerEarnings: s.astrologerEarnings || 0,
+                            platformFee: s.platformFee || 0
                         }
                     });
                 }
@@ -634,6 +638,42 @@ router.get("/transactions", async (req, res) => {
         });
     } catch (error) {
         console.error("GET /api/wallet/transactions error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+/**
+ * GET /api/wallet/admin/profit
+ * Returns company profit (admin wallet balance and platform fee summary)
+ */
+router.get("/admin/profit", async (req, res) => {
+    try {
+        const Admin = require("../models/admin.model");
+        const VideoSession = require("../models/videoSession.model");
+        const ChatSession = require("../models/chatSession.model");
+
+        const admin = await Admin.findOne();
+        
+        const [calls, chats] = await Promise.all([
+            VideoSession.find({ status: "COMPLETED" }),
+            ChatSession.find({ status: "COMPLETED" })
+        ]);
+
+        const callProfit = calls.reduce((sum, s) => sum + (s.platformFee || 0), 0);
+        const chatProfit = chats.reduce((sum, s) => sum + (s.platformFee || 0), 0);
+        const totalPlatformFees = parseFloat((callProfit + chatProfit).toFixed(2));
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                adminWalletBalance: admin ? (admin.walletBalance || 0) : 0,
+                totalPlatformFeesCollected: totalPlatformFees,
+                callPlatformFees: parseFloat(callProfit.toFixed(2)),
+                chatPlatformFees: parseFloat(chatProfit.toFixed(2))
+            }
+        });
+    } catch (error) {
+        console.error("GET /api/wallet/admin/profit error:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
 });

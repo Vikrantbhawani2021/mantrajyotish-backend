@@ -86,6 +86,12 @@ const VideoSessionSchema = new mongoose.Schema(
         min: 0
     },
 
+    platformFee: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+
     totalDurationMinutes: {
         type: Number,
         default: 0,

@@ -327,9 +327,7 @@ const initSocket = (server) => {
                     }
                 }
 
-                const perMinuteRate = astroObj.chatPrice !== undefined && astroObj.chatPrice !== null
-                    ? astroObj.chatPrice
-                    : (astroObj.consultationFee || 20);
+                const perMinuteRate = 9; // Flat 9 Rupees per minute
                 const minBalanceRequired = perMinuteRate * 2;
 
                 if ((userObj.walletBalance || 0) < minBalanceRequired) {

@@ -32,7 +32,10 @@ const startCallBillingTimer = (sessionId, io) => {
                 return;
             }
 
-            const rate = session.perMinuteRate || astrologer.consultationFee || 25;
+            // Flat rate of 9 Rupees per minute for all astrologers/calls
+            const rate = 9;
+            const astroEarnings = parseFloat((rate * 0.60).toFixed(2));
+            const platFee = parseFloat((rate * 0.40).toFixed(2));
 
             // If user has insufficient balance, end the session
             if ((user.walletBalance || 0) < rate) {
@@ -50,13 +53,24 @@ const startCallBillingTimer = (sessionId, io) => {
                 return;
             }
 
-            // Deduct per-minute rate
+            // Deduct per-minute rate from user
             user.walletBalance = parseFloat((user.walletBalance - rate).toFixed(2));
-            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + rate).toFixed(2));
+            
+            // Add 60% to astrologer wallet balance
+            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + astroEarnings).toFixed(2));
+
+            // Add 40% to admin wallet balance for company profit
+            const Admin = require("../models/admin.model");
+            const adminObj = await Admin.findOne();
+            if (adminObj) {
+                adminObj.walletBalance = parseFloat(((adminObj.walletBalance || 0) + platFee).toFixed(2));
+                await adminObj.save();
+            }
 
             session.totalDurationMinutes += 1;
             session.totalAmountDeducted = parseFloat(((session.totalAmountDeducted || 0) + rate).toFixed(2));
-            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + rate).toFixed(2));
+            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + astroEarnings).toFixed(2));
+            session.platformFee = parseFloat(((session.platformFee || 0) + platFee).toFixed(2));
 
             await user.save();
             await astrologer.save();

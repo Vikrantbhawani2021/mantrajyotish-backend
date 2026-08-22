@@ -93,9 +93,7 @@ exports.initiateChat = async (req, res, next) => {
             });
         }
 
-        const perMinuteRate = astrologer.chatPrice !== undefined && astrologer.chatPrice !== null
-            ? astrologer.chatPrice
-            : (astrologer.consultationFee || 20);
+        const perMinuteRate = 9; // Flat 9 Rupees per minute
         const minBalanceRequired = perMinuteRate * 2;
 
         if ((user.walletBalance || 0) < minBalanceRequired) {

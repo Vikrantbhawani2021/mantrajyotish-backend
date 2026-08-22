@@ -26,6 +26,10 @@ const AdminSchema = new mongoose.Schema(
         lastLoginAt: {
             type: Date,
             default: null
+        },
+        walletBalance: {
+            type: Number,
+            default: 0
         }
     },
     {

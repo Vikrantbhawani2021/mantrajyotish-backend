@@ -67,6 +67,12 @@ const ChatSessionSchema = new mongoose.Schema(
             min: 0
         },
 
+        platformFee: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
+
         rejectionReason: {
             type: String,
             default: null

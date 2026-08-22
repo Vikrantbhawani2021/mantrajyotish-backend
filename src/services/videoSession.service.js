@@ -125,17 +125,8 @@ const requestCallSession = async ({ userId, astrologerId, callType = "VIDEO", wa
     const typeStr = String(callType).toUpperCase();
     const normalizedCallType = (typeStr === "AUDIO" || typeStr === "CALL" || typeStr === "VOICE" || typeStr === "PHONE") ? "AUDIO" : "VIDEO";
 
-    // Set dynamic rate based on call type
-    let perMinuteRate;
-    if (normalizedCallType === "AUDIO") {
-        perMinuteRate = astrologer.audioCallPrice !== undefined && astrologer.audioCallPrice !== null
-            ? astrologer.audioCallPrice
-            : (astrologer.consultationFee || 25);
-    } else {
-        perMinuteRate = astrologer.videoCallPrice !== undefined && astrologer.videoCallPrice !== null
-            ? astrologer.videoCallPrice
-            : (astrologer.consultationFee || 40);
-    }
+    // Flat rate of 9 Rupees per minute for all video/audio calls
+    const perMinuteRate = 9;
 
     // Ensure DB user wallet balance is healthy (at least ₹1000 or client balance)
     const effectiveBal = Math.max(user.walletBalance || 0, Number(walletBalance) || 0, 1000);
@@ -289,6 +280,9 @@ const endCallSession = async (sessionId) => {
         expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
     }
 
+    const expectedAstroEarnings = parseFloat((expectedCost * 0.60).toFixed(2));
+    const expectedPlatFee = parseFloat((expectedCost * 0.40).toFixed(2));
+
     if (session.status === "PENDING") {
         session.status = "CANCELLED";
     } else {
@@ -313,19 +307,31 @@ const endCallSession = async (sessionId) => {
                 const prevUserBalance = user.walletBalance || 0;
                 user.walletBalance = Math.max(0, parseFloat((prevUserBalance - difference).toFixed(2)));
                 
-                // Add earnings to astrologer wallet
+                // Add 60% earnings difference to astrologer wallet
+                const astroDiff = parseFloat((expectedAstroEarnings - (session.astrologerEarnings || 0)).toFixed(2));
                 const prevAstroBalance = astrologer.walletBalance || 0;
-                astrologer.walletBalance = parseFloat((prevAstroBalance + difference).toFixed(2));
+                astrologer.walletBalance = parseFloat((prevAstroBalance + astroDiff).toFixed(2));
+
+                // Add 40% platform fee difference to admin wallet for company profit
+                const platDiff = parseFloat((expectedPlatFee - (session.platformFee || 0)).toFixed(2));
+                const Admin = require("../models/admin.model");
+                const adminObj = await Admin.findOne();
+                if (adminObj) {
+                    adminObj.walletBalance = parseFloat(((adminObj.walletBalance || 0) + platDiff).toFixed(2));
+                    await adminObj.save();
+                }
                 
                 session.totalAmountDeducted = expectedCost;
-                session.astrologerEarnings = expectedCost;
+                session.astrologerEarnings = expectedAstroEarnings;
+                session.platformFee = expectedPlatFee;
                 
                 await user.save();
                 await astrologer.save();
-                console.log(`💰 [Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${difference}. Full cost: ₹${expectedCost}`);
+                console.log(`💰 [Reconciliation] Charged User ${user._id} extra ₹${difference}. Paid Astrologer ${astrologer._id} ₹${astroDiff}. Company Profit: ₹${platDiff}. Full cost: ₹${expectedCost}`);
             } else {
                 session.totalAmountDeducted = Math.max(session.totalAmountDeducted || 0, expectedCost);
-                session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedCost);
+                session.astrologerEarnings = Math.max(session.astrologerEarnings || 0, expectedAstroEarnings);
+                session.platformFee = Math.max(session.platformFee || 0, expectedPlatFee);
             }
         }
     } catch (billingErr) {
