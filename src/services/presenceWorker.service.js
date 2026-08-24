@@ -32,7 +32,11 @@ const checkOrphanedSessions = async () => {
             const sessionStart = session.startTime ? new Date(session.startTime).getTime() : now;
             // Only auto-end if the session has been active for at least 45 seconds to avoid initial sync race conditions
             if (now - sessionStart > 45000) {
-                if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
+                // Safeguard: verify if the astrologer is offline in the DB first before terminating their active session
+                const astroRecord = await Astrologer.findById(session.astrologer).lean().catch(() => null);
+                const isOfflineInDb = !astroRecord || astroRecord.isOnline === false;
+                
+                if (isOfflineInDb && (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000)))) {
                     console.log(`🧹 Presence worker: Auto-ending orphaned active chat session ${session._id} (astrologer offline)`);
                     stopBillingTimer(session._id);
                     await endChatSession(session._id).catch(err => console.error("Error ending orphaned chat:", err.message));
@@ -47,7 +51,11 @@ const checkOrphanedSessions = async () => {
             const sessionStart = session.startTime ? new Date(session.startTime).getTime() : now;
             // Only auto-end if the session has been active for at least 45 seconds to avoid initial sync race conditions
             if (now - sessionStart > 45000) {
-                if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
+                // Safeguard: verify if the astrologer is offline in the DB first before terminating their active session
+                const astroRecord = await Astrologer.findById(session.astrologer).lean().catch(() => null);
+                const isOfflineInDb = !astroRecord || astroRecord.isOnline === false;
+
+                if (isOfflineInDb && (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000)))) {
                     console.log(`🧹 Presence worker: Auto-ending orphaned active call session ${session._id} (astrologer offline)`);
                     stopCallBillingTimer(session._id);
                     await endCallSession(session._id).catch(err => console.error("Error ending orphaned call:", err.message));
@@ -88,6 +96,28 @@ const checkOnlineAstrologersPresence = async () => {
 
             // If no active presence is found in Redis, the astrologer's heartbeat/session expired
             if (!presence) {
+                const ChatSession = require("../models/chatSession.model");
+                const VideoSession = require("../models/videoSession.model");
+
+                // Check if they are currently in an active session (chat or call)
+                const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE" }).lean().catch(() => null);
+                const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE" }).lean().catch(() => null);
+                
+                if (activeChat || activeCall) {
+                    console.log(`ℹ️ Heartbeat missed for Astrologer ${astro.name} (${astro._id}) but they are in an active session. Skipping transition to OFFLINE.`);
+                    // Eagerly restore/re-write presence key to Redis so it doesn't stay null
+                    const { setPresence } = require("./presence.service");
+                    await setPresence(astro._id, {
+                        status: "BUSY",
+                        connections: 1,
+                        lastHeartbeat: Date.now(),
+                        activeSessionId: String(activeChat ? activeChat._id : activeCall._id),
+                        timestamp: Date.now(),
+                        version: 1
+                    }).catch(() => null);
+                    continue;
+                }
+
                 console.log(`⚠️ Heartbeat missed or Redis key expired for Astrologer ${astro.name} (${astro._id}). Transitioning to OFFLINE.`);
                 await transitionStatus(astro._id, "OFFLINE").catch(err => {
                     console.error(`Failed to automatically transition astro ${astro._id} offline:`, err.message);
