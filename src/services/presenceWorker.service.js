@@ -101,7 +101,7 @@ const checkOnlineAstrologersPresence = async () => {
 
                 // Check if they are currently in an active session (chat or call)
                 const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE" }).lean().catch(() => null);
-                const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE" }).lean().catch(() => null);
+                const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: { $in: ["ACTIVE", "live"] } }).lean().catch(() => null);
                 
                 if (activeChat || activeCall) {
                     console.log(`ℹ️ Heartbeat missed for Astrologer ${astro.name} (${astro._id}) but they are in an active session. Skipping transition to OFFLINE.`);
