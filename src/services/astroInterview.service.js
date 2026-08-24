@@ -143,7 +143,8 @@ const scheduleInterview = async (identifier, interviewDate, meetingLink, intervi
 
     interview.interviewDate = new Date(interviewDate);
     // Custom Agora Web Interview Link (fallback default is set, but frontends will override with Agora UI)
-    interview.meetingLink = meetingLink || `https://astrologer-interview.digitalinapp.com/room/${channelName}`;
+    const frontendUrl = process.env.ASTROGER_APP_URL || 'https://astrologer.mantrajyotish.com';
+    interview.meetingLink = meetingLink || `${frontendUrl.replace(/\/$/, "")}/pending-approval?room=${channelName}&join=true`;
     interview.status = "scheduled";
     interview.scheduledAt = new Date();
     

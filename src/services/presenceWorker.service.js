@@ -4,6 +4,50 @@ const { getPresence, transitionStatus } = require("./presence.service");
 let workerInterval = null;
 
 /**
+ * Scan active chat and call sessions and auto-end them if astrologer is offline
+ */
+const checkOrphanedSessions = async () => {
+    try {
+        const ChatSession = require("../models/chatSession.model");
+        const VideoSession = require("../models/videoSession.model");
+        const { endChatSession, stopBillingTimer } = require("./chatBilling.service");
+        const { endCallSession } = require("./videoSession.service");
+        const { stopCallBillingTimer } = require("./callBilling.service");
+        const { getPresence } = require("./presence.service");
+        const { getRedisClient } = require("../config/redis");
+        
+        const redisClient = getRedisClient();
+        if (!redisClient || !redisClient.isOpen) return;
+
+        const now = Date.now();
+
+        // Scan for active chat sessions
+        const activeChats = await ChatSession.find({ status: "ACTIVE" });
+        for (const session of activeChats) {
+            const presence = await getPresence(session.astrologer);
+            if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
+                console.log(`🧹 Presence worker: Auto-ending orphaned active chat session ${session._id} (astrologer offline)`);
+                stopBillingTimer(session._id);
+                await endChatSession(session._id).catch(err => console.error("Error ending orphaned chat:", err.message));
+            }
+        }
+
+        // Scan for active call sessions
+        const activeCalls = await VideoSession.find({ status: { $in: ["ACTIVE", "live"] } });
+        for (const session of activeCalls) {
+            const presence = await getPresence(session.astrologer);
+            if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
+                console.log(`🧹 Presence worker: Auto-ending orphaned active call session ${session._id} (astrologer offline)`);
+                stopCallBillingTimer(session._id);
+                await endCallSession(session._id).catch(err => console.error("Error ending orphaned call:", err.message));
+            }
+        }
+    } catch (err) {
+        console.error("Presence worker: checkOrphanedSessions error:", err.message);
+    }
+};
+
+/**
  * Scan online astrologers in MongoDB and transition them offline if Redis presence has expired
  */
 const checkOnlineAstrologersPresence = async () => {
@@ -14,6 +58,9 @@ const checkOnlineAstrologersPresence = async () => {
             // Redis is down or not connected, skip presence checks to avoid setting everyone offline
             return;
         }
+
+        // 1. Reconcile orphaned chat/call sessions
+        await checkOrphanedSessions();
 
         const onlineAstrologers = await Astrologer.find({
             status: "approved",

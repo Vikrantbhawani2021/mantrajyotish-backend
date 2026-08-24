@@ -41,6 +41,6 @@ module.exports = {
                 pass: process.env.SMTP_PASS,
             },
         },
-        from: process.env.EMAIL_FROM || "noreply@digitalinapp.com",
+        from: process.env.EMAIL_FROM || "noreply@mantrajyotish.com",
     }
 };

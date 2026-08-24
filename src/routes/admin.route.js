@@ -13,8 +13,11 @@ router.post("/login", adminController.loginAdmin);
 // Logged-in Admin Profile
 router.get("/profile", authMiddleware, adminController.getProfile);
 
-// Admin Astrologer CRUD Management
+// Dashboard Statistics
 const adminMiddleware = require("../middlewares/admin.middleware");
+router.get("/dashboard-stats", authMiddleware, adminMiddleware, adminController.getDashboardStats);
+
+// Admin Astrologer CRUD Management
 router.get("/astrologers", authMiddleware, adminMiddleware, adminController.getAstrologers);
 router.get("/astrologers/:id", authMiddleware, adminMiddleware, adminController.getAstrologerById);
 router.put("/astrologers/:id", authMiddleware, adminMiddleware, adminController.updateAstrologer);

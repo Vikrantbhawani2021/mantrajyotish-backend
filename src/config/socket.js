@@ -20,6 +20,7 @@ const videoSessionService = require("../services/videoSession.service");
 
 let io;
 const disconnectTimeouts = new Map();
+const sessionDisconnectTimeouts = new Map();
 
 const extractSessionId = (data) => {
     if (!data) return null;
@@ -423,6 +424,15 @@ const initSocket = (server) => {
             if (!sessionId) return;
 
             const cleanId = String(sessionId);
+            socket.activeSessionId = cleanId;
+            const userId = socket.associatedUserId || (socket.decodedUser && socket.decodedUser.userId) || socket.id;
+            const sessionKey = `${userId}_${cleanId}`;
+            if (sessionDisconnectTimeouts.has(sessionKey)) {
+                clearTimeout(sessionDisconnectTimeouts.get(sessionKey));
+                sessionDisconnectTimeouts.delete(sessionKey);
+                console.log(`🔌 Restored active chat session ${cleanId} for user/astro ${userId} (reconnect within grace period)`);
+            }
+
             socket.join(`session_${cleanId}`);
             socket.join(cleanId);
             socket.join(`chat_${cleanId}`);
@@ -665,7 +675,17 @@ const initSocket = (server) => {
             const sessionId = extractSessionId(data);
             if (!sessionId) return;
 
-            const roomName = `call_${sessionId}`;
+            const cleanId = String(sessionId);
+            socket.activeSessionId = cleanId;
+            const userId = socket.associatedUserId || (socket.decodedUser && socket.decodedUser.userId) || socket.id;
+            const sessionKey = `${userId}_${cleanId}`;
+            if (sessionDisconnectTimeouts.has(sessionKey)) {
+                clearTimeout(sessionDisconnectTimeouts.get(sessionKey));
+                sessionDisconnectTimeouts.delete(sessionKey);
+                console.log(`🔌 Restored active call session ${cleanId} for user/astro ${userId} (reconnect within grace period)`);
+            }
+
+            const roomName = `call_${cleanId}`;
             socket.join(roomName);
             console.log(`📞 Socket ${socket.id} joined call room: ${roomName}`);
 
@@ -782,6 +802,7 @@ const initSocket = (server) => {
                 const result = await videoSessionService.acceptCallSession(sessionId);
 
                 socket.join(`call_${sessionId}`);
+                socket.activeSessionId = String(sessionId);
 
                 startCallBillingTimer(sessionId, io);
 
@@ -995,6 +1016,49 @@ const initSocket = (server) => {
         // Disconnect Handler
         socket.on("disconnect", async () => {
             console.log(`🔌 Socket Disconnected: ${socket.id}`);
+
+            if (socket.activeSessionId) {
+                const sessionId = socket.activeSessionId;
+                const userId = socket.associatedUserId || (socket.decodedUser && socket.decodedUser.userId) || socket.id;
+                const sessionKey = `${userId}_${sessionId}`;
+
+                if (sessionDisconnectTimeouts.has(sessionKey)) {
+                    clearTimeout(sessionDisconnectTimeouts.get(sessionKey));
+                    sessionDisconnectTimeouts.delete(sessionKey);
+                }
+
+                const gracePeriod = 25000; // 25 seconds grace period
+                console.log(`⏳ Session connection lost. Starting grace period of 25s for session ${sessionId} (User/Astro: ${userId})`);
+
+                const timeoutId = setTimeout(async () => {
+                    sessionDisconnectTimeouts.delete(sessionKey);
+                    try {
+                        const VideoSession = require("../models/videoSession.model");
+                        const ChatSession = require("../models/chatSession.model");
+                        const { endCallSession } = require("../services/videoSession.service");
+                        const { endChatSession } = require("../services/chatBilling.service");
+
+                        const videoSession = await VideoSession.findById(sessionId);
+                        if (videoSession && videoSession.status === "ACTIVE") {
+                            console.log(`🔌 Disconnect Grace Period Expired: Auto-ending call session ${sessionId}`);
+                            stopCallBillingTimer(sessionId);
+                            await endCallSession(sessionId);
+                        } else {
+                            const chatSession = await ChatSession.findById(sessionId);
+                            if (chatSession && chatSession.status === "ACTIVE") {
+                                console.log(`🔌 Disconnect Grace Period Expired: Auto-ending chat session ${sessionId}`);
+                                stopBillingTimer(sessionId);
+                                await endChatSession(sessionId);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error in session disconnect timeout handler:", err.message);
+                    }
+                }, gracePeriod);
+
+                sessionDisconnectTimeouts.set(sessionKey, timeoutId);
+            }
+
             if (socket.associatedAstroId) {
                 const astroId = socket.associatedAstroId;
                 const { getPresence, setPresence, transitionStatus } = require("../services/presence.service");
