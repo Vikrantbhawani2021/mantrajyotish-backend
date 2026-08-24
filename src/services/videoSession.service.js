@@ -360,16 +360,19 @@ const endCallSession = async (sessionId) => {
                 astro.isAvailable = false;
                 await astro.save();
             } else {
-                // No other active sessions. Check if socket connections still exist to determine ONLINE or OFFLINE
-                const { getPresence, transitionStatus } = require("./presence.service");
-                const presence = await getPresence(astro._id);
-                if (!presence || presence.status !== "OFFLINE") {
+                // No other active sessions.
+                // Use manualOffline as source of truth — Redis can be stale after server
+                // restart or heartbeat expiry. If the astrologer didn't explicitly go offline,
+                // always restore them to ONLINE so they don't stay stuck as BUSY.
+                const { transitionStatus } = require("./presence.service");
+                if (!astro.manualOffline) {
                     await transitionStatus(astro._id, "ONLINE");
                     console.log(`🔄 Restored Astrologer ${astro._id} status to ONLINE on call end.`);
                 } else {
                     astro.isOnline = false;
                     astro.isAvailable = false;
                     await astro.save();
+                    console.log(`ℹ️ Astrologer ${astro._id} was manually offline — kept OFFLINE after call end.`);
                 }
             }
         }
@@ -383,10 +386,36 @@ const endCallSession = async (sessionId) => {
  * Get Call Session Details by ID
  */
 const getVideoSessionById = async (id) => {
-    return await VideoSession.findById(id)
+    const session = await VideoSession.findById(id)
         .populate("appointment")
         .populate("user", "firstname lastname phone profileImage walletBalance dateofbirth timeofbirth placeofbirth name")
         .populate("astrologer", "name profileImage consultationFee specialization");
+
+    if (!session) return null;
+
+    // Attach a fresh Agora token so the frontend can rejoin after a refresh.
+    // If the session is COMPLETED, we skip token generation to save compute.
+    let freshAgoraToken = null;
+    let appId = process.env.AGORA_APP_ID || null;
+    if (session.status === "ACTIVE" && session.channelName) {
+        try {
+            freshAgoraToken = agoraService.generateRtcToken(session.channelName, 0, "publisher");
+        } catch (e) {
+            console.warn("Could not generate fresh Agora token for rejoin:", e.message);
+        }
+    }
+
+    // Return a plain object with all fields so toJSON() doesn't strip the extras
+    return {
+        ...session.toObject(),
+        // Agora rejoin fields — safe to send; token is time-limited & session-scoped
+        appId,
+        agoraToken: freshAgoraToken,
+        channelName: session.channelName || session.roomId,
+        callType: session.callType,
+        status: session.status,
+        sessionId: session._id.toString(),
+    };
 };
 
 /**

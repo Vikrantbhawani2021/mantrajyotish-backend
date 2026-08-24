@@ -368,14 +368,21 @@ const endChatSession = async (sessionId) => {
                 astro.isAvailable = false;
                 await astro.save();
             } else {
-                // No other active sessions. Check if socket connections still exist to determine ONLINE or OFFLINE
-                const { getPresence, transitionStatus } = require("./presence.service");
-                const presence = await getPresence(astro._id);
-                const hasConnections = presence ? (presence.connections > 0) : true;
-                const nextStatus = hasConnections ? "ONLINE" : "OFFLINE";
-                
-                await transitionStatus(astro._id, nextStatus);
-                console.log(`📶 Astrologer ${astro.name || astro._id} presence transitioned to ${nextStatus} on chat session end`);
+                // No other active sessions.
+                // Use manualOffline DB flag as source of truth — Redis connection count
+                // can be zero or stale even when the astrologer is online (e.g., after
+                // server restart or heartbeat gap). If they didn't manually go offline,
+                // always restore them to ONLINE.
+                const { transitionStatus } = require("./presence.service");
+                if (!astro.manualOffline) {
+                    await transitionStatus(astro._id, "ONLINE");
+                    console.log(`🔄 Restored Astrologer ${astro.name || astro._id} to ONLINE on chat end.`);
+                } else {
+                    astro.isOnline = false;
+                    astro.isAvailable = false;
+                    await astro.save();
+                    console.log(`ℹ️ Astrologer ${astro.name || astro._id} was manually offline — kept OFFLINE after chat end.`);
+                }
             }
         }
     } catch (e) {
