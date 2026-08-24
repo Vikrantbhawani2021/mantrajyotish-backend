@@ -3,7 +3,30 @@ try {
     dns.setDefaultResultOrder("ipv4first");
 } catch (e) {}
 
-require("dotenv").config();
+const fs = require("fs");
+const path = require("path");
+
+const nodeEnv = process.env.NODE_ENV || "development";
+let envLoaded = false;
+
+if (nodeEnv === "production") {
+    if (fs.existsSync(path.resolve(process.cwd(), ".env.production"))) {
+        require("dotenv").config({ path: ".env.production" });
+        console.log("◇ Loaded environment variables from .env.production");
+        envLoaded = true;
+    }
+} else {
+    if (fs.existsSync(path.resolve(process.cwd(), ".env.development"))) {
+        require("dotenv").config({ path: ".env.development" });
+        console.log("◇ Loaded environment variables from .env.development");
+        envLoaded = true;
+    }
+}
+
+if (!envLoaded) {
+    require("dotenv").config();
+    console.log("◇ Loaded environment variables from default .env");
+}
 require("./src/config/config");
 
 const http = require("http");
