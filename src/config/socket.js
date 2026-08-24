@@ -24,8 +24,22 @@ const sessionDisconnectTimeouts = new Map();
 
 const extractSessionId = (data) => {
     if (!data) return null;
-    if (typeof data === "string") return data;
-    return data.sessionId || data.chatId || data.callId || data._id || data.id || (data.session && (data.session._id || data.session.id)) || null;
+    let idStr = null;
+    if (typeof data === "string") {
+        idStr = data;
+    } else {
+        idStr = data.sessionId || data.chatId || data.callId || data._id || data.id || (data.session && (data.session._id || data.session.id));
+    }
+    if (!idStr || typeof idStr !== "string") return null;
+
+    let cleanId = idStr;
+    if (idStr.startsWith("call_")) cleanId = idStr.replace("call_", "");
+    if (idStr.startsWith("session_")) cleanId = idStr.replace("session_", "");
+
+    if (/^[0-9a-fA-F]{24}$/.test(cleanId)) {
+        return cleanId;
+    }
+    return null;
 };
 
 const broadcastAstroStatus = (astroId, isOnline, isAvailable) => {

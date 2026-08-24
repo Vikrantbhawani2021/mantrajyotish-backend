@@ -26,7 +26,18 @@ const sessionAuthMiddleware = async (req, res, next) => {
         const sessionAstro = String(session.astrologer && (session.astrologer._id || session.astrologer));
         const requestUser = String(userId);
 
-        if (requestUser !== sessionUser && requestUser !== sessionAstro) {
+        let actualAstroId = requestUser;
+        const Astrologer = require("../models/astro.model");
+        const astroProfile = await Astrologer.findOne({
+            $or: [{ _id: userId }, { astrologerLogin: userId }]
+        }).lean().catch(() => null);
+        if (astroProfile) {
+            actualAstroId = String(astroProfile._id);
+        }
+
+        console.log("🔒 [SessionAuth Debug] requestUser:", requestUser, "actualAstroId:", actualAstroId, "sessionUser:", sessionUser, "sessionAstro:", sessionAstro);
+
+        if (requestUser !== sessionUser && actualAstroId !== sessionAstro) {
             return res.status(403).json({
                 success: false,
                 message: "Forbidden: You are not authorized to access this consultation session"
