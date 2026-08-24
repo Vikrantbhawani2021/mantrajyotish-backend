@@ -439,12 +439,10 @@ const initSocket = (server) => {
 
             const cleanId = String(sessionId);
             socket.activeSessionId = cleanId;
-            const userId = socket.associatedUserId || (socket.decodedUser && socket.decodedUser.userId) || socket.id;
-            const sessionKey = `${userId}_${cleanId}`;
-            if (sessionDisconnectTimeouts.has(sessionKey)) {
-                clearTimeout(sessionDisconnectTimeouts.get(sessionKey));
-                sessionDisconnectTimeouts.delete(sessionKey);
-                console.log(`🔌 Restored active chat session ${cleanId} for user/astro ${userId} (reconnect within grace period)`);
+            if (sessionDisconnectTimeouts.has(cleanId)) {
+                clearTimeout(sessionDisconnectTimeouts.get(cleanId));
+                sessionDisconnectTimeouts.delete(cleanId);
+                console.log(`🔌 Restored active chat session ${cleanId} (reconnect within grace period)`);
             }
 
             socket.join(`session_${cleanId}`);
@@ -691,12 +689,10 @@ const initSocket = (server) => {
 
             const cleanId = String(sessionId);
             socket.activeSessionId = cleanId;
-            const userId = socket.associatedUserId || (socket.decodedUser && socket.decodedUser.userId) || socket.id;
-            const sessionKey = `${userId}_${cleanId}`;
-            if (sessionDisconnectTimeouts.has(sessionKey)) {
-                clearTimeout(sessionDisconnectTimeouts.get(sessionKey));
-                sessionDisconnectTimeouts.delete(sessionKey);
-                console.log(`🔌 Restored active call session ${cleanId} for user/astro ${userId} (reconnect within grace period)`);
+            if (sessionDisconnectTimeouts.has(cleanId)) {
+                clearTimeout(sessionDisconnectTimeouts.get(cleanId));
+                sessionDisconnectTimeouts.delete(cleanId);
+                console.log(`🔌 Restored active call session ${cleanId} (reconnect within grace period)`);
             }
 
             const roomName = `call_${cleanId}`;
@@ -1062,19 +1058,17 @@ const initSocket = (server) => {
 
             if (socket.activeSessionId) {
                 const sessionId = socket.activeSessionId;
-                const userId = socket.associatedUserId || (socket.decodedUser && socket.decodedUser.userId) || socket.id;
-                const sessionKey = `${userId}_${sessionId}`;
 
-                if (sessionDisconnectTimeouts.has(sessionKey)) {
-                    clearTimeout(sessionDisconnectTimeouts.get(sessionKey));
-                    sessionDisconnectTimeouts.delete(sessionKey);
+                if (sessionDisconnectTimeouts.has(sessionId)) {
+                    clearTimeout(sessionDisconnectTimeouts.get(sessionId));
+                    sessionDisconnectTimeouts.delete(sessionId);
                 }
 
                 const gracePeriod = 25000; // 25 seconds grace period
-                console.log(`⏳ Session connection lost. Starting grace period of 25s for session ${sessionId} (User/Astro: ${userId})`);
+                console.log(`⏳ Session connection lost. Starting grace period of 25s for session ${sessionId}`);
 
                 const timeoutId = setTimeout(async () => {
-                    sessionDisconnectTimeouts.delete(sessionKey);
+                    sessionDisconnectTimeouts.delete(sessionId);
                     try {
                         const VideoSession = require("../models/videoSession.model");
                         const ChatSession = require("../models/chatSession.model");
@@ -1099,7 +1093,7 @@ const initSocket = (server) => {
                     }
                 }, gracePeriod);
 
-                sessionDisconnectTimeouts.set(sessionKey, timeoutId);
+                sessionDisconnectTimeouts.set(sessionId, timeoutId);
             }
 
             if (socket.associatedAstroId) {
