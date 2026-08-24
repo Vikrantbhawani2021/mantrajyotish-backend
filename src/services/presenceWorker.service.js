@@ -8,6 +8,10 @@ let workerInterval = null;
  */
 const checkOrphanedSessions = async () => {
     try {
+        const mongoose = require("mongoose");
+        if (mongoose.connection.readyState !== 1) {
+            return;
+        }
         const ChatSession = require("../models/chatSession.model");
         const VideoSession = require("../models/videoSession.model");
         const { endChatSession, stopBillingTimer } = require("./chatBilling.service");
@@ -25,10 +29,14 @@ const checkOrphanedSessions = async () => {
         const activeChats = await ChatSession.find({ status: "ACTIVE" });
         for (const session of activeChats) {
             const presence = await getPresence(session.astrologer);
-            if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
-                console.log(`🧹 Presence worker: Auto-ending orphaned active chat session ${session._id} (astrologer offline)`);
-                stopBillingTimer(session._id);
-                await endChatSession(session._id).catch(err => console.error("Error ending orphaned chat:", err.message));
+            const sessionStart = session.startTime ? new Date(session.startTime).getTime() : now;
+            // Only auto-end if the session has been active for at least 45 seconds to avoid initial sync race conditions
+            if (now - sessionStart > 45000) {
+                if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
+                    console.log(`🧹 Presence worker: Auto-ending orphaned active chat session ${session._id} (astrologer offline)`);
+                    stopBillingTimer(session._id);
+                    await endChatSession(session._id).catch(err => console.error("Error ending orphaned chat:", err.message));
+                }
             }
         }
 
@@ -36,10 +44,14 @@ const checkOrphanedSessions = async () => {
         const activeCalls = await VideoSession.find({ status: { $in: ["ACTIVE", "live"] } });
         for (const session of activeCalls) {
             const presence = await getPresence(session.astrologer);
-            if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
-                console.log(`🧹 Presence worker: Auto-ending orphaned active call session ${session._id} (astrologer offline)`);
-                stopCallBillingTimer(session._id);
-                await endCallSession(session._id).catch(err => console.error("Error ending orphaned call:", err.message));
+            const sessionStart = session.startTime ? new Date(session.startTime).getTime() : now;
+            // Only auto-end if the session has been active for at least 45 seconds to avoid initial sync race conditions
+            if (now - sessionStart > 45000) {
+                if (!presence || (presence.connections === 0 && presence.status === "OFFLINE" && (now - presence.timestamp > 30000))) {
+                    console.log(`🧹 Presence worker: Auto-ending orphaned active call session ${session._id} (astrologer offline)`);
+                    stopCallBillingTimer(session._id);
+                    await endCallSession(session._id).catch(err => console.error("Error ending orphaned call:", err.message));
+                }
             }
         }
     } catch (err) {
@@ -52,6 +64,10 @@ const checkOrphanedSessions = async () => {
  */
 const checkOnlineAstrologersPresence = async () => {
     try {
+        const mongoose = require("mongoose");
+        if (mongoose.connection.readyState !== 1) {
+            return;
+        }
         const { getRedisClient } = require("../config/redis");
         const redisClient = getRedisClient();
         if (!redisClient || !redisClient.isOpen) {
