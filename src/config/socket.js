@@ -438,6 +438,9 @@ const initSocket = (server) => {
             if (!sessionId) return;
 
             const cleanId = String(sessionId);
+            if (cleanId === String(socket.associatedAstroId) || cleanId === String(socket.associatedUserId)) {
+                return;
+            }
             socket.activeSessionId = cleanId;
             if (sessionDisconnectTimeouts.has(cleanId)) {
                 clearTimeout(sessionDisconnectTimeouts.get(cleanId));
@@ -688,6 +691,9 @@ const initSocket = (server) => {
             if (!sessionId) return;
 
             const cleanId = String(sessionId);
+            if (cleanId === String(socket.associatedAstroId) || cleanId === String(socket.associatedUserId)) {
+                return;
+            }
             socket.activeSessionId = cleanId;
             if (sessionDisconnectTimeouts.has(cleanId)) {
                 clearTimeout(sessionDisconnectTimeouts.get(cleanId));
