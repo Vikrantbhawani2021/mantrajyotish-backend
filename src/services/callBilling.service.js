@@ -2,11 +2,11 @@ const VideoSession = require("../models/videoSession.model");
 const User = require("../models/user.model");
 const Astrologer = require("../models/astro.model");
 
-// In-memory store for active call session timers: sessionId -> IntervalId
+// In-memory store for active call timers: sessionId -> { timeoutId, intervalId }
 const activeCallTimers = new Map();
 
 /**
- * Start per-minute billing recurring timer for an active audio/video call session
+ * Start per-second billing simulation and wallet limit timeout for an active call session
  */
 const startCallBillingTimer = (sessionId, io) => {
     const key = sessionId.toString();
@@ -16,91 +16,91 @@ const startCallBillingTimer = (sessionId, io) => {
         return;
     }
 
-    const intervalId = setInterval(async () => {
+    // Set a timeout to fetch the session and calculate the duration
+    setTimeout(async () => {
         try {
             const session = await VideoSession.findById(sessionId);
             if (!session || (session.status !== "ACTIVE" && session.status !== "live")) {
-                stopCallBillingTimer(sessionId);
                 return;
             }
 
             const user = await User.findById(session.user);
-            const astrologer = await Astrologer.findById(session.astrologer);
+            if (!user) return;
 
-            if (!user || !astrologer) {
-                stopCallBillingTimer(sessionId);
-                return;
-            }
+            const rate = Number(session.perMinuteRate || session.rate || 9);
+            const ratePerSec = rate / 60;
+            const userBalance = Number(user.walletBalance) || 0;
 
-            // Flat rate of 9 Rupees per minute for all astrologers/calls
-            const rate = 9;
-            const astroEarnings = parseFloat((rate * 0.60).toFixed(2));
-            const platFee = parseFloat((rate * 0.40).toFixed(2));
+            // Calculate max allowed duration in seconds
+            const maxSeconds = Math.max(1, Math.floor(userBalance / ratePerSec));
+            console.log(`⏱️ Call ${sessionId} starting. Rate: ₹${rate}/min. User Balance: ₹${userBalance}. Max allowed duration: ${maxSeconds}s.`);
 
-            // If user has insufficient balance, end the session
-            if ((user.walletBalance || 0) < rate) {
-                stopCallBillingTimer(sessionId);
-                session.status = "COMPLETED";
-                session.endTime = new Date();
-                await session.save();
-                if (io) {
-                    const endPayload = { sessionId, message: "Call ended: insufficient wallet balance." };
-                    io.to(`call_${sessionId}`).emit("call_ended_insufficient_funds", endPayload);
-                    const rawUser = session.user;
-                    const userId = (rawUser && typeof rawUser === "object") ? String(rawUser._id || "") : String(rawUser || "");
-                    if (userId) io.to(`user_${userId}`).emit("call_ended_insufficient_funds", endPayload);
+            // 1. Timeout to end the call automatically when balance runs out
+            const timeoutId = setTimeout(async () => {
+                try {
+                    console.log(`🚨 Auto-ending call session ${sessionId} due to zero wallet balance.`);
+                    stopCallBillingTimer(sessionId);
+                    
+                    const { endCallSession } = require("./videoSession.service");
+                    const endedSession = await endCallSession(sessionId);
+
+                    if (io) {
+                        const endPayload = { sessionId, message: "Call ended: insufficient wallet balance." };
+                        io.to(`call_${sessionId}`).emit("call_ended_insufficient_funds", endPayload);
+                        io.to(`call_${sessionId}`).emit("call_ended", { success: true, session: endedSession });
+                        
+                        const userId = String(endedSession.user);
+                        if (userId) io.to(`user_${userId}`).emit("call_ended_insufficient_funds", endPayload);
+                    }
+                } catch (timeoutErr) {
+                    console.error("Error in call billing timeout:", timeoutErr.message);
                 }
-                return;
-            }
+            }, maxSeconds * 1000);
 
-            // Deduct per-minute rate from user
-            user.walletBalance = parseFloat((user.walletBalance - rate).toFixed(2));
-            
-            // Add 60% to astrologer wallet balance
-            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + astroEarnings).toFixed(2));
+            // 2. Interval to broadcast timer ticks to clients (every 10 seconds)
+            const intervalId = setInterval(async () => {
+                try {
+                    const freshSession = await VideoSession.findById(sessionId);
+                    if (!freshSession || (freshSession.status !== "ACTIVE" && freshSession.status !== "live")) {
+                        stopCallBillingTimer(sessionId);
+                        return;
+                    }
 
-            // Add 40% to admin wallet balance for company profit
-            const Admin = require("../models/admin.model");
-            const adminObj = await Admin.findOne();
-            if (adminObj) {
-                adminObj.walletBalance = parseFloat(((adminObj.walletBalance || 0) + platFee).toFixed(2));
-                await adminObj.save();
-            }
+                    const startTime = freshSession.startTime || new Date();
+                    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(startTime).getTime()) / 1000));
+                    const currentCost = parseFloat((elapsedSeconds * ratePerSec).toFixed(2));
+                    const remainingBalance = Math.max(0, parseFloat((userBalance - currentCost).toFixed(2)));
 
-            session.totalDurationMinutes += 1;
-            session.totalAmountDeducted = parseFloat(((session.totalAmountDeducted || 0) + rate).toFixed(2));
-            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + astroEarnings).toFixed(2));
-            session.platformFee = parseFloat(((session.platformFee || 0) + platFee).toFixed(2));
+                    if (io) {
+                        const tickPayload = {
+                            sessionId,
+                            elapsedMinutes: Math.floor(elapsedSeconds / 60),
+                            elapsedSeconds,
+                            remainingBalance,
+                            totalDeducted: currentCost
+                        };
+                        io.to(`call_${sessionId}`).emit("timer_tick", tickPayload);
+                        io.to(`call_${sessionId}`).emit("timerTick", tickPayload);
 
-            await user.save();
-            await astrologer.save();
-            await session.save();
-
-            // Emit live timer update tick
-            if (io) {
-                io.to(`call_${sessionId}`).emit("timer_tick", {
-                    sessionId,
-                    elapsedMinutes: session.totalDurationMinutes,
-                    remainingBalance: user.walletBalance,
-                    totalDeducted: session.totalAmountDeducted
-                });
-
-                // Send warning if user balance is low (< 1 minute rate remaining)
-                if (user.walletBalance < rate) {
-                    io.to(`call_${sessionId}`).emit("wallet_warning", {
-                        message: "Your wallet balance is low. Please recharge to continue the call.",
-                        remainingBalance: user.walletBalance
-                    });
+                        // Emit wallet warning if less than 1 minute of balance remains
+                        if (remainingBalance < rate) {
+                            io.to(`call_${sessionId}`).emit("wallet_warning", {
+                                message: "Your wallet balance is low. Please recharge to continue the call.",
+                                remainingBalance
+                            });
+                        }
+                    }
+                } catch (intervalErr) {
+                    console.error("Error in call billing interval tick:", intervalErr.message);
                 }
-            }
+            }, 10000); // every 10 seconds
 
-        } catch (error) {
-            console.error(`[Call Billing Timer Error - Session ${sessionId}]:`, error);
+            activeCallTimers.set(key, { timeoutId, intervalId });
+
+        } catch (err) {
+            console.error("Error starting call billing timer:", err.message);
         }
-    }, 60000); // 60-second billing interval
-
-    activeCallTimers.set(key, intervalId);
-    console.log(`⏱️ Billing timer started for Call Session: ${sessionId}`);
+    }, 1000);
 };
 
 /**
@@ -109,7 +109,9 @@ const startCallBillingTimer = (sessionId, io) => {
 const stopCallBillingTimer = (sessionId) => {
     const key = sessionId.toString();
     if (activeCallTimers.has(key)) {
-        clearInterval(activeCallTimers.get(key));
+        const timers = activeCallTimers.get(key);
+        clearTimeout(timers.timeoutId);
+        clearInterval(timers.intervalId);
         activeCallTimers.delete(key);
         console.log(`🛑 Billing timer stopped for Call Session: ${sessionId}`);
     }

@@ -275,7 +275,7 @@ const endCallSession = async (sessionId) => {
     if (startTime) {
         const durationMs = endTime.getTime() - new Date(startTime).getTime();
         durationSeconds = Math.max(0, Math.floor(durationMs / 1000));
-        const ratePerMin = session.perMinuteRate || 25;
+        const ratePerMin = Number(session.perMinuteRate || session.rate || 9);
         const ratePerSec = ratePerMin / 60;
         expectedCost = parseFloat((durationSeconds * ratePerSec).toFixed(2));
     }
@@ -447,7 +447,7 @@ const startVideoSession = async (id) => {
     if (!session) throw new Error("Video session not found");
 
     session.status = "live";
-    session.startTime = new Date();
+    if (!session.startTime) session.startTime = new Date();
     await session.save();
 
     const agoraData = agoraService.generateRtcToken(session.roomId, 0, "publisher");

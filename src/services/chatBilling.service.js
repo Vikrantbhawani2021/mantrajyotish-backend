@@ -2,105 +2,104 @@ const ChatSession = require("../models/chatSession.model");
 const User = require("../models/user.model");
 const Astrologer = require("../models/astro.model");
 
-// In-memory store for active session timers: sessionId -> IntervalId
+// In-memory store for active chat timers: sessionId -> { timeoutId, intervalId }
 const activeTimers = new Map();
 
 /**
- * Start per-minute billing recurring timer for an active chat session
+ * Start per-second billing simulation and wallet limit timeout for an active chat session
  */
 const startBillingTimer = (sessionId, io) => {
-    // If timer already running for this session, don't duplicate
-    if (activeTimers.has(sessionId.toString())) {
+    const key = sessionId.toString();
+
+    // Prevent duplicate billing timers
+    if (activeTimers.has(key)) {
         return;
     }
 
-    const intervalId = setInterval(async () => {
+    setTimeout(async () => {
         try {
             const session = await ChatSession.findById(sessionId);
             if (!session || session.status !== "ACTIVE") {
-                stopBillingTimer(sessionId);
                 return;
             }
 
             const user = await User.findById(session.user);
-            const astrologer = await Astrologer.findById(session.astrologer);
-
-            if (!user || !astrologer) {
-                stopBillingTimer(sessionId);
-                return;
-            }
+            if (!user) return;
 
             // Flat rate of 9 Rupees per minute for all chats
             const rate = 9;
-            const astroEarnings = parseFloat((rate * 0.60).toFixed(2));
-            const platFee = parseFloat((rate * 0.40).toFixed(2));
+            const ratePerSec = rate / 60;
+            const userBalance = Number(user.walletBalance) || 0;
 
-            // If user has insufficient balance, end the chat session
-            if ((user.walletBalance || 0) < rate) {
-                stopBillingTimer(sessionId);
-                session.status = "COMPLETED";
-                session.endTime = new Date();
-                await session.save();
-                if (io) {
-                    const endPayload = { sessionId, message: "Chat ended: insufficient wallet balance." };
-                    io.to(`session_${sessionId}`).emit("chat_ended_insufficient_funds", endPayload);
-                    const rawUser = session.user;
-                    const userId = (rawUser && typeof rawUser === "object") ? String(rawUser._id || "") : String(rawUser || "");
-                    if (userId) io.to(`user_${userId}`).emit("chat_ended_insufficient_funds", endPayload);
+            // Calculate max allowed duration in seconds
+            const maxSeconds = Math.max(1, Math.floor(userBalance / ratePerSec));
+            console.log(`⏱️ Chat ${sessionId} starting. Rate: ₹${rate}/min. User Balance: ₹${userBalance}. Max allowed duration: ${maxSeconds}s.`);
+
+            // 1. Timeout to end the chat automatically when balance runs out
+            const timeoutId = setTimeout(async () => {
+                try {
+                    console.log(`🚨 Auto-ending chat session ${sessionId} due to zero wallet balance.`);
+                    stopBillingTimer(sessionId);
+                    
+                    const endedSession = await endChatSession(sessionId);
+
+                    if (io) {
+                        const endPayload = { sessionId, message: "Chat ended: insufficient wallet balance." };
+                        io.to(`session_${sessionId}`).emit("chat_ended_insufficient_funds", endPayload);
+                        io.to(`session_${sessionId}`).emit("chat_ended", { success: true, session: endedSession });
+                        
+                        const userId = String(endedSession.user);
+                        if (userId) io.to(`user_${userId}`).emit("chat_ended_insufficient_funds", endPayload);
+                    }
+                } catch (timeoutErr) {
+                    console.error("Error in chat billing timeout:", timeoutErr.message);
                 }
-                return;
-            }
+            }, maxSeconds * 1000);
 
-            // Normal 1-minute deduction
-            user.walletBalance = parseFloat((user.walletBalance - rate).toFixed(2));
-            
-            // Add 60% to astrologer wallet balance
-            astrologer.walletBalance = parseFloat(((astrologer.walletBalance || 0) + astroEarnings).toFixed(2));
+            // 2. Interval to broadcast timer ticks to clients (every 10 seconds)
+            const intervalId = setInterval(async () => {
+                try {
+                    const freshSession = await ChatSession.findById(sessionId);
+                    if (!freshSession || freshSession.status !== "ACTIVE") {
+                        stopBillingTimer(sessionId);
+                        return;
+                    }
 
-            // Add 40% to admin wallet balance for company profit
-            const Admin = require("../models/admin.model");
-            const adminObj = await Admin.findOne();
-            if (adminObj) {
-                adminObj.walletBalance = parseFloat(((adminObj.walletBalance || 0) + platFee).toFixed(2));
-                await adminObj.save();
-            }
+                    const startTime = freshSession.startTime || new Date();
+                    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(startTime).getTime()) / 1000));
+                    const currentCost = parseFloat((elapsedSeconds * ratePerSec).toFixed(2));
+                    const remainingBalance = Math.max(0, parseFloat((userBalance - currentCost).toFixed(2)));
 
-            session.totalDurationMinutes += 1;
-            session.totalAmountDeducted = parseFloat(((session.totalAmountDeducted || 0) + rate).toFixed(2));
-            session.astrologerEarnings = parseFloat(((session.astrologerEarnings || 0) + astroEarnings).toFixed(2));
-            session.platformFee = parseFloat(((session.platformFee || 0) + platFee).toFixed(2));
+                    if (io) {
+                        const tickPayload = {
+                            sessionId,
+                            elapsedMinutes: Math.floor(elapsedSeconds / 60),
+                            elapsedSeconds,
+                            remainingBalance,
+                            totalDeducted: currentCost
+                        };
+                        io.to(`session_${sessionId}`).emit("timer_tick", tickPayload);
+                        io.to(`session_${sessionId}`).emit("timerTick", tickPayload);
 
-            await user.save();
-            await astrologer.save();
-            await session.save();
-
-            // Notify room with updated tick details
-            if (io) {
-                const elapsedSeconds = session.startTime ? Math.floor((Date.now() - new Date(session.startTime).getTime()) / 1000) : (session.totalDurationMinutes * 60);
-                io.to(`session_${sessionId}`).emit("timer_tick", {
-                    sessionId,
-                    elapsedMinutes: session.totalDurationMinutes,
-                    elapsedSeconds,
-                    remainingBalance: user.walletBalance,
-                    totalDeducted: session.totalAmountDeducted
-                });
-
-                // Send warning if user balance is low (< 1 minute rate remaining)
-                if (user.walletBalance < rate) {
-                    io.to(`session_${sessionId}`).emit("wallet_warning", {
-                        message: "Your wallet balance is low. Please recharge to continue the session.",
-                        remainingBalance: user.walletBalance
-                    });
+                        // Emit wallet warning if less than 1 minute of balance remains
+                        if (remainingBalance < rate) {
+                            io.to(`session_${sessionId}`).emit("wallet_warning", {
+                                message: "Your wallet balance is low. Please recharge to continue the chat.",
+                                remainingBalance
+                            });
+                        }
+                    }
+                } catch (intervalErr) {
+                    console.error("Error in chat billing interval tick:", intervalErr.message);
                 }
-            }
+            }, 10000); // every 10 seconds
 
-        } catch (error) {
-            console.error(`[Billing Timer Error - Session ${sessionId}]:`, error);
+            activeTimers.set(key, { timeoutId, intervalId });
+
+        } catch (err) {
+            console.error("Error starting chat billing timer:", err.message);
         }
-    }, 60000); // Run every 60 seconds
-
-    activeTimers.set(sessionId.toString(), intervalId);
-    console.log(`⏱️ Billing timer started for Chat Session: ${sessionId}`);
+    }, 1000);
 };
 
 /**
@@ -109,7 +108,9 @@ const startBillingTimer = (sessionId, io) => {
 const stopBillingTimer = (sessionId) => {
     const key = sessionId.toString();
     if (activeTimers.has(key)) {
-        clearInterval(activeTimers.get(key));
+        const timers = activeTimers.get(key);
+        clearTimeout(timers.timeoutId);
+        clearInterval(timers.intervalId);
         activeTimers.delete(key);
         console.log(`🛑 Billing timer stopped for Chat Session: ${sessionId}`);
     }
