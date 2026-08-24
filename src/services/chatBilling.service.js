@@ -361,7 +361,7 @@ const endChatSession = async (sessionId) => {
             );
 
             const activeChat = await ChatSession.findOne({ astrologer: astro._id, status: "ACTIVE", _id: { $ne: session._id } });
-            const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: "ACTIVE" });
+            const activeCall = await VideoSession.findOne({ astrologer: astro._id, status: { $in: ["ACTIVE", "live"] } });
             
             if (activeChat || activeCall) {
                 // Keep BUSY if another session is active
