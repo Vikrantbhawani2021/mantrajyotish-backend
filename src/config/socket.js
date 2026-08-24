@@ -14,8 +14,8 @@ const ChatMessage = require("../models/chatMessage.model");
 const VideoSession = require("../models/videoSession.model");
 const User = require("../models/user.model");
 const Astrologer = require("../models/astro.model");
-const { startBillingTimer, stopBillingTimer } = require("../services/chatBilling.service");
-const { startCallBillingTimer, stopCallBillingTimer } = require("../services/callBilling.service");
+const { startBillingTimer, stopBillingTimer, pauseChatBilling, resumeChatBilling } = require("../services/chatBilling.service");
+const { startCallBillingTimer, stopCallBillingTimer, pauseCallBilling, resumeCallBilling } = require("../services/callBilling.service");
 const videoSessionService = require("../services/videoSession.service");
 
 let io;
@@ -904,6 +904,35 @@ const initSocket = (server) => {
 
             } catch (err) {
                 console.error("end_call_session socket error:", err);
+            }
+        });
+
+        // Billing Pause & Resume handlers (triggered when user goes to recharge wallet)
+        socket.on("pause_session_billing", async (data) => {
+            try {
+                const sessionId = extractSessionId(data);
+                if (!sessionId) return;
+
+                console.log(`⏸️ Pause requested for session: ${sessionId}`);
+                // Try call billing first, then chat billing
+                await pauseCallBilling(sessionId, io);
+                await pauseChatBilling(sessionId, io);
+            } catch (err) {
+                console.error("Error in pause_session_billing event:", err.message);
+            }
+        });
+
+        socket.on("resume_session_billing", async (data) => {
+            try {
+                const sessionId = extractSessionId(data);
+                if (!sessionId) return;
+
+                console.log(`▶️ Resume requested for session: ${sessionId}`);
+                // Try call billing first, then chat billing
+                await resumeCallBilling(sessionId, io);
+                await resumeChatBilling(sessionId, io);
+            } catch (err) {
+                console.error("Error in resume_session_billing event:", err.message);
             }
         });
 

@@ -14,7 +14,9 @@ router.post("/message", chatController.sendMessage);
 // Chat History & Listing APIs
 router.get("/history/:sessionId", chatController.getChatHistory);
 router.get("/sessions", chatController.getMySessions);
-router.get("/details/:sessionId", chatController.getSessionDetails);
+const authMiddleware = require("../middlewares/auth.middleware");
+const sessionAuthMiddleware = require("../middlewares/sessionAuth.middleware");
+router.get("/details/:sessionId", authMiddleware, sessionAuthMiddleware, chatController.getSessionDetails);
 
 // Rating & Review API
 router.post("/rate", chatController.rateChat);

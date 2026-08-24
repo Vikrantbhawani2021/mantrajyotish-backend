@@ -2,7 +2,7 @@ const ChatSession = require("../models/chatSession.model");
 const User = require("../models/user.model");
 const Astrologer = require("../models/astro.model");
 
-// In-memory store for active chat timers: sessionId -> { timeoutId, intervalId }
+// In-memory store for active chat timers: sessionId -> { timeoutId, intervalId, isPaused, pausedAt, safetyTimeoutId }
 const activeTimers = new Map();
 
 /**
@@ -94,12 +94,157 @@ const startBillingTimer = (sessionId, io) => {
                 }
             }, 10000); // every 10 seconds
 
-            activeTimers.set(key, { timeoutId, intervalId });
+            activeTimers.set(key, { timeoutId, intervalId, isPaused: false, pausedAt: null });
 
         } catch (err) {
             console.error("Error starting chat billing timer:", err.message);
         }
     }, 1000);
+};
+
+/**
+ * Pause chat billing (triggered when user clicks Recharge)
+ */
+const pauseChatBilling = async (sessionId, io) => {
+    const key = sessionId.toString();
+    if (!activeTimers.has(key)) return;
+
+    const timers = activeTimers.get(key);
+    if (timers.isPaused) return;
+
+    // Clear active zero-balance timeout and interval tick
+    clearTimeout(timers.timeoutId);
+    clearInterval(timers.intervalId);
+
+    timers.isPaused = true;
+    timers.pausedAt = Date.now();
+
+    // 120-second safety timeout to end chat if user does not recharge/resume
+    timers.safetyTimeoutId = setTimeout(async () => {
+        try {
+            console.log(`🚨 Pause safety limit reached. Auto-ending chat session ${sessionId}.`);
+            stopBillingTimer(sessionId);
+            
+            const endedSession = await endChatSession(sessionId);
+
+            if (io) {
+                const endPayload = { sessionId, message: "Chat ended: recharge safety limit (2 min) exceeded." };
+                io.to(`session_${sessionId}`).emit("chat_ended_insufficient_funds", endPayload);
+                io.to(`session_${sessionId}`).emit("chat_ended", { success: true, session: endedSession });
+            }
+        } catch (err) {
+            console.error("Error in chat pause safety timeout:", err.message);
+        }
+    }, 120000); // 2 minutes
+
+    activeTimers.set(key, timers);
+
+    if (io) {
+        io.to(`session_${sessionId}`).emit("billing_paused", {
+            message: "User is recharging their wallet. Billing is temporarily paused."
+        });
+    }
+    console.log(`⏸️ Billing paused for Chat Session: ${sessionId}`);
+};
+
+/**
+ * Resume chat billing after wallet recharge
+ */
+const resumeChatBilling = async (sessionId, io) => {
+    const key = sessionId.toString();
+    if (!activeTimers.has(key)) return;
+
+    const timers = activeTimers.get(key);
+    if (!timers.isPaused) return;
+
+    // Clear the 2-minute safety timeout
+    clearTimeout(timers.safetyTimeoutId);
+
+    const pauseDuration = Date.now() - timers.pausedAt;
+    timers.isPaused = false;
+    timers.pausedAt = null;
+
+    try {
+        const session = await ChatSession.findById(sessionId);
+        const user = await User.findById(session.user);
+        if (!session || !user) return;
+
+        // Shift the startTime forward by the pause duration
+        if (session.startTime) {
+            session.startTime = new Date(new Date(session.startTime).getTime() + pauseDuration);
+            await session.save();
+        }
+
+        const rate = 9;
+        const ratePerSec = rate / 60;
+        const userBalance = Number(user.walletBalance) || 0;
+
+        const startTime = session.startTime || new Date();
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(startTime).getTime()) / 1000));
+        const currentCost = elapsedSeconds * ratePerSec;
+
+        const remainingSeconds = Math.max(1, Math.floor((userBalance - currentCost) / ratePerSec));
+
+        // Restart zero-balance timeout
+        timers.timeoutId = setTimeout(async () => {
+            try {
+                console.log(`🚨 Auto-ending chat session ${sessionId} due to zero wallet balance.`);
+                stopBillingTimer(sessionId);
+                
+                const endedSession = await endChatSession(sessionId);
+
+                if (io) {
+                    const endPayload = { sessionId, message: "Chat ended: insufficient wallet balance." };
+                    io.to(`session_${sessionId}`).emit("chat_ended_insufficient_funds", endPayload);
+                    io.to(`session_${sessionId}`).emit("chat_ended", { success: true, session: endedSession });
+                }
+            } catch (err) {
+                console.error("Error in chat billing timeout:", err.message);
+            }
+        }, remainingSeconds * 1000);
+
+        // Restart interval ticks (every 10 seconds)
+        timers.intervalId = setInterval(async () => {
+            try {
+                const freshSession = await ChatSession.findById(sessionId);
+                if (!freshSession || freshSession.status !== "ACTIVE") {
+                    stopBillingTimer(sessionId);
+                    return;
+                }
+
+                const elapsed = Math.max(0, Math.floor((Date.now() - new Date(freshSession.startTime).getTime()) / 1000));
+                const cost = parseFloat((elapsed * ratePerSec).toFixed(2));
+                const bal = Math.max(0, parseFloat((userBalance - cost).toFixed(2)));
+
+                if (io) {
+                    const tickPayload = {
+                        sessionId,
+                        elapsedMinutes: Math.floor(elapsed / 60),
+                        elapsedSeconds: elapsed,
+                        remainingBalance: bal,
+                        totalDeducted: cost
+                    };
+                    io.to(`session_${sessionId}`).emit("timer_tick", tickPayload);
+                    io.to(`session_${sessionId}`).emit("timerTick", tickPayload);
+                }
+            } catch (intervalErr) {
+                console.error("Error in chat interval tick:", intervalErr.message);
+            }
+        }, 10000);
+
+        activeTimers.set(key, timers);
+
+        if (io) {
+            io.to(`session_${sessionId}`).emit("billing_resumed", {
+                message: "Wallet recharge successful. Billing has resumed.",
+                remainingBalance: userBalance
+            });
+        }
+        console.log(`▶️ Billing resumed for Chat Session: ${sessionId}`);
+
+    } catch (err) {
+        console.error("Error resuming chat billing:", err.message);
+    }
 };
 
 /**
@@ -111,6 +256,7 @@ const stopBillingTimer = (sessionId) => {
         const timers = activeTimers.get(key);
         clearTimeout(timers.timeoutId);
         clearInterval(timers.intervalId);
+        if (timers.safetyTimeoutId) clearTimeout(timers.safetyTimeoutId);
         activeTimers.delete(key);
         console.log(`🛑 Billing timer stopped for Chat Session: ${sessionId}`);
     }
@@ -242,5 +388,7 @@ const endChatSession = async (sessionId) => {
 module.exports = {
     startBillingTimer,
     stopBillingTimer,
-    endChatSession
+    endChatSession,
+    pauseChatBilling,
+    resumeChatBilling
 };

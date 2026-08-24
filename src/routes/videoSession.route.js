@@ -26,7 +26,8 @@ router.post("/create", videoSessionController.createVideoSession);
 router.post("/start", videoSessionController.startVideoSession);
 router.post("/start/:id", videoSessionController.startVideoSession);
 router.get("/all", videoSessionController.getAllVideoSessions);
-router.get("/:id", videoSessionController.getVideoSessionById);
+const sessionAuthMiddleware = require("../middlewares/sessionAuth.middleware");
+router.get("/:id", authMiddleware, sessionAuthMiddleware, videoSessionController.getVideoSessionById);
 router.put("/update/:id", authMiddleware, videoSessionController.updateVideoSession);
 router.delete("/delete/:id", authMiddleware, videoSessionController.deleteVideoSession);
 
