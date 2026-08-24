@@ -22,8 +22,8 @@ const sessionAuthMiddleware = async (req, res, next) => {
         }
 
         // Secure verification: check if authenticated user belongs to session
-        const sessionUser = String(session.user);
-        const sessionAstro = String(session.astrologer);
+        const sessionUser = String(session.user && (session.user._id || session.user));
+        const sessionAstro = String(session.astrologer && (session.astrologer._id || session.astrologer));
         const requestUser = String(userId);
 
         if (requestUser !== sessionUser && requestUser !== sessionAstro) {
