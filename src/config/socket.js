@@ -1064,8 +1064,8 @@ const initSocket = (server) => {
                     sessionDisconnectTimeouts.delete(sessionId);
                 }
 
-                const gracePeriod = 25000; // 25 seconds grace period
-                console.log(`⏳ Session connection lost. Starting grace period of 25s for session ${sessionId}`);
+                const gracePeriod = 120000; // 120 seconds (2 minutes) grace period to accommodate mobile phone locking & app switching
+                console.log(`⏳ Session connection lost. Starting grace period of 120s for session ${sessionId}`);
 
                 const timeoutId = setTimeout(async () => {
                     sessionDisconnectTimeouts.delete(sessionId);
