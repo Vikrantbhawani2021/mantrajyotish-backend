@@ -196,6 +196,25 @@ const toggleOnlineStatus = async (id, isOnline, isAvailable) => {
 };
 
 const updateAstrologer = async (id, data) => {
+    const existing = await Astrologer.findById(id);
+    if (existing) {
+        const currentGender = data.gender || existing.gender;
+        
+        const isDefaultPic = !existing.profileImage || 
+            (existing.profileImage.includes("res.cloudinary.com") && 
+             (existing.profileImage.includes("astro_female_pic") || 
+              existing.profileImage.includes("astro_male_pic") || 
+              existing.profileImage.includes("astro_profile_pic")));
+
+        if (data.profileImage === null || data.profileImage === "") {
+            const { getDefaultProfilePic } = require("./cloudinary.service");
+            data.profileImage = getDefaultProfilePic(id, "astrologer", currentGender);
+        } else if (!data.profileImage && isDefaultPic && data.gender && data.gender !== existing.gender) {
+            const { getDefaultProfilePic } = require("./cloudinary.service");
+            data.profileImage = getDefaultProfilePic(id, "astrologer", data.gender);
+        }
+    }
+
     const updated = await Astrologer.findByIdAndUpdate(
         id,
         data,

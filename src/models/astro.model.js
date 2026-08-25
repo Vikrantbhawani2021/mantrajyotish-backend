@@ -203,8 +203,21 @@ const AstroSchema = new mongoose.Schema(
         }
     },
     {
-        timestamps: true
+        timestamps: true,
+        toJSON: { virtuals: true },
+        toObject: { virtuals: true }
     }
 );
+
+AstroSchema.virtual("avatar").get(function () {
+    return this.profileImage;
+});
+
+AstroSchema.pre("save", async function () {
+    if (!this.profileImage) {
+        const { getDefaultProfilePic } = require("../services/cloudinary.service");
+        this.profileImage = getDefaultProfilePic(this._id, "astrologer", this.gender);
+    }
+});
 
 module.exports = mongoose.model("Astrologer", AstroSchema);

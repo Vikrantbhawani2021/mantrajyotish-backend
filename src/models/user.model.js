@@ -103,6 +103,11 @@ const UserSchema = new mongoose.Schema(
       default: "user",
     },
 
+    profileImage: {
+      type: String,
+      default: null,
+    },
+
     isProfileCompleted: {
       type: Boolean,
       default: false,
@@ -122,13 +127,23 @@ const UserSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
   }
 );
+
+UserSchema.virtual("avatar").get(function () {
+  return this.profileImage;
+});
 
 UserSchema.pre("save", async function () {
   if (!this.uniqueId) {
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
     this.uniqueId = `UB${randomDigits}`;
+  }
+  if (!this.profileImage) {
+    const { getDefaultProfilePic } = require("../services/cloudinary.service");
+    this.profileImage = getDefaultProfilePic(this._id, this.role, this.gender);
   }
 });
 

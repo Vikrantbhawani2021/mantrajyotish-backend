@@ -386,6 +386,7 @@ const initSocket = (server) => {
                     lastname: userObj.lastname || resolvedName.split(" ").slice(1).join(" "),
                     phone: userObj.phone || "",
                     email: userObj.email || "",
+                    avatar: userObj.profileImage || userObj.avatar || "",
                     profileImage: userObj.profileImage || userObj.avatar || "",
                     dob: userObj.dateofbirth ? formatDate(userObj.dateofbirth) : (userObj.dob || "Not Specified"),
                     tob: userObj.timeofbirth || userObj.tob || "Not Specified",

@@ -7,7 +7,7 @@ const uploadImage = async (req, res) => {
 
         // 1. If file uploaded via Multer (multipart/form-data)
         if (req.file && req.file.buffer) {
-            imageUrl = await cloudinaryService.uploadBuffer(req.file.buffer, "astro_uploads");
+            imageUrl = await cloudinaryService.uploadBuffer(req.file.buffer, "astro_uploads", req.file.mimetype);
         }
         // 2. If Base64 string or URL sent in body JSON
         else if (req.body && (req.body.image || req.body.file || req.body.base64)) {

@@ -150,6 +150,15 @@ const getUserById = async (req, res, next) => {
 const updateProfile = async (req, res, next) => {
     try {
         const userId = req.params.id || (req.user && req.user.userId);
+        
+        const existingUser = await User.findById(userId);
+        if (!existingUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
         const updates = { ...req.body };
 
         if (updates.name && typeof updates.name === "string") {
@@ -166,6 +175,23 @@ const updateProfile = async (req, res, next) => {
 
         if (updates.dateofbirth) {
             updates.dateofbirth = new Date(updates.dateofbirth);
+        }
+
+        const currentGender = updates.gender || existingUser.gender;
+        const currentRole = updates.role || existingUser.role;
+
+        const isDefaultPic = !existingUser.profileImage || 
+            (existingUser.profileImage.includes("res.cloudinary.com") && 
+             (existingUser.profileImage.includes("user_female_pic") || 
+              existingUser.profileImage.includes("user_male_pic") || 
+              existingUser.profileImage.includes("user_profile_pic")));
+
+        if (updates.profileImage === null || updates.profileImage === "") {
+            const { getDefaultProfilePic } = require("../services/cloudinary.service");
+            updates.profileImage = getDefaultProfilePic(userId, currentRole, currentGender);
+        } else if (!updates.profileImage && isDefaultPic && updates.gender && updates.gender !== existingUser.gender) {
+            const { getDefaultProfilePic } = require("../services/cloudinary.service");
+            updates.profileImage = getDefaultProfilePic(userId, currentRole, updates.gender);
         }
 
         updates.isProfileCompleted = true;
