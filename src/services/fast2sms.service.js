@@ -45,6 +45,7 @@ const sendOtp = async (phone, otp) => {
         if (route === "dlt") {
             const senderId = process.env.FAST2SMS_SENDER_ID;
             const messageId = process.env.FAST2SMS_DLT_MESSAGE_ID; // The message ID of the template in Fast2SMS
+            const entityId = process.env.FAST2SMS_ENTITY_ID; // DLT Principal Entity ID
             
             if (!senderId || !messageId) {
                 throw new Error("For DLT route, FAST2SMS_SENDER_ID and FAST2SMS_DLT_MESSAGE_ID environment variables must be set.");
@@ -53,6 +54,10 @@ const sendOtp = async (phone, otp) => {
             url.searchParams.append("sender_id", senderId);
             url.searchParams.append("message", messageId);
             url.searchParams.append("variables_values", otp);
+            
+            if (entityId) {
+                url.searchParams.append("entity_id", entityId);
+            }
         } else {
             // Default Quick SMS route (expensive)
             url.searchParams.append("message", `Your Astro verification code is: ${otp}`);
