@@ -83,7 +83,7 @@ const registerUser = async (req, res, next) => {
             country: country || null,
             address: address || null,
             phone,
-            email: email ? email.toLowerCase() : null,
+            email: email && email.trim() ? email.trim().toLowerCase() : undefined,
             role: role || "user",
             isProfileCompleted: Boolean(name || (firstname && lastname))
         });
@@ -160,6 +160,16 @@ const updateProfile = async (req, res, next) => {
         }
 
         const updates = { ...req.body };
+        const unsetFields = {};
+
+        if ('email' in updates) {
+            if (updates.email && typeof updates.email === "string" && updates.email.trim()) {
+                updates.email = updates.email.trim().toLowerCase();
+            } else {
+                delete updates.email;
+                unsetFields.email = 1;
+            }
+        }
 
         if (updates.name && typeof updates.name === "string") {
             const parts = updates.name.trim().split(/\s+/);
@@ -196,9 +206,14 @@ const updateProfile = async (req, res, next) => {
 
         updates.isProfileCompleted = true;
 
+        const updateQuery = { $set: updates };
+        if (Object.keys(unsetFields).length > 0) {
+            updateQuery.$unset = unsetFields;
+        }
+
         const user = await User.findByIdAndUpdate(
             userId,
-            { $set: updates },
+            updateQuery,
             { returnDocument: 'after', runValidators: true }
         );
 
