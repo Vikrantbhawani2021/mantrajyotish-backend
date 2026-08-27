@@ -35,12 +35,28 @@ const sendOtp = async (phone, otp) => {
     }
 
     try {
-        // Fast2SMS API v2 Quick SMS route to bypass website verification limits:
         const url = new URL("https://www.fast2sms.com/dev/bulkV2");
         url.searchParams.append("authorization", config.apiKey);
-        url.searchParams.append("route", "q");
-        url.searchParams.append("message", `Your Astro verification code is: ${otp}`);
+
+        const route = process.env.FAST2SMS_ROUTE || "q"; // "q" for Quick SMS, "dlt" for DLT
+        url.searchParams.append("route", route);
         url.searchParams.append("numbers", cleanPhone);
+
+        if (route === "dlt") {
+            const senderId = process.env.FAST2SMS_SENDER_ID;
+            const messageId = process.env.FAST2SMS_DLT_MESSAGE_ID; // The message ID of the template in Fast2SMS
+            
+            if (!senderId || !messageId) {
+                throw new Error("For DLT route, FAST2SMS_SENDER_ID and FAST2SMS_DLT_MESSAGE_ID environment variables must be set.");
+            }
+
+            url.searchParams.append("sender_id", senderId);
+            url.searchParams.append("message", messageId);
+            url.searchParams.append("variables_values", otp);
+        } else {
+            // Default Quick SMS route (expensive)
+            url.searchParams.append("message", `Your Astro verification code is: ${otp}`);
+        }
 
         const response = await fetch(url.toString(), {
             method: "GET",
@@ -55,10 +71,10 @@ const sendOtp = async (phone, otp) => {
             throw new Error(data.message || `Fast2SMS API response status ${response.status}: ${JSON.stringify(data)}`);
         }
 
-        console.log(`✉️ Fast2SMS OTP sent successfully to ${cleanPhone}. Message: ${data.message}`);
+        console.log(`✉️ Fast2SMS OTP sent successfully to ${cleanPhone} via ${route} route. Message: ${data.message}`);
         return {
             success: true,
-            message: "OTP sent successfully via Fast2SMS",
+            message: `OTP sent successfully via Fast2SMS (${route})`,
             response: data
         };
     } catch (error) {
