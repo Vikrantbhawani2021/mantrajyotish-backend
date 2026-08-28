@@ -44,6 +44,13 @@ const AstroSchema = new mongoose.Schema(
             default: null
         },
 
+        gender: {
+            type: String,
+            enum: ["male", "female", "other"],
+            default: null,
+            lowercase: true
+        },
+
         profileImage: {
             type: String,
             default: null
@@ -214,7 +221,13 @@ AstroSchema.virtual("avatar").get(function () {
 });
 
 AstroSchema.pre("save", async function () {
-    if (!this.profileImage) {
+    const isDefaultPic = !this.profileImage || 
+                         this.profileImage.includes("user_female_pic") || 
+                         this.profileImage.includes("user_male_pic") || 
+                         this.profileImage.includes("astro_female_pic") || 
+                         this.profileImage.includes("astro_male_pic");
+
+    if (isDefaultPic) {
         const { getDefaultProfilePic } = require("../services/cloudinary.service");
         this.profileImage = getDefaultProfilePic(this._id, "astrologer", this.gender);
     }

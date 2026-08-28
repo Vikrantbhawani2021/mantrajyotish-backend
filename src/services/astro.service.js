@@ -50,6 +50,53 @@ const createAstrologer = async (data) => {
         .populate("astrologerLogin");
 };
 
+const enrichAstrologersWithStats = async (astrologersList) => {
+    if (!astrologersList || astrologersList.length === 0) return [];
+    
+    const ChatSession = require("../models/chatSession.model");
+    const VideoSession = require("../models/videoSession.model");
+    
+    return await Promise.all(astrologersList.map(async (a) => {
+        try {
+            const [chatCount, callCount, chatEarnings, callEarnings] = await Promise.all([
+                ChatSession.countDocuments({ astrologer: a._id, status: "COMPLETED" }),
+                VideoSession.countDocuments({ astrologer: a._id, status: { $in: ["COMPLETED", "ACTIVE", "live"] } }),
+                ChatSession.aggregate([
+                    { $match: { astrologer: a._id, status: "COMPLETED" } },
+                    { $group: { _id: null, total: { $sum: "$astrologerEarnings" } } }
+                ]),
+                VideoSession.aggregate([
+                    { $match: { astrologer: a._id, status: "COMPLETED" } },
+                    { $group: { _id: null, total: { $sum: "$astrologerEarnings" } } }
+                ])
+            ]);
+
+            const chatEarn = chatEarnings[0]?.total || 0;
+            const callEarn = callEarnings[0]?.total || 0;
+            const totalEarnings = parseFloat((chatEarn + callEarn).toFixed(2));
+
+            return {
+                ...a,
+                totalChats: chatCount,
+                totalCalls: callCount,
+                totalEarnings: totalEarnings,
+                chatEarnings: parseFloat(chatEarn.toFixed(2)),
+                callEarnings: parseFloat(callEarn.toFixed(2))
+            };
+        } catch (err) {
+            console.error("Failed to aggregate stats for astrologer:", a._id, err.message);
+            return {
+                ...a,
+                totalChats: 0,
+                totalCalls: 0,
+                totalEarnings: 0,
+                chatEarnings: 0,
+                callEarnings: 0
+            };
+        }
+    }));
+};
+
 const getAllAstrologers = async (filter = {}) => {
     // Default to status: "approved" for public listing unless custom status filter is requested
     const query = { ...filter };
@@ -65,15 +112,17 @@ const getAllAstrologers = async (filter = {}) => {
         .populate("astrologerLogin")
         .lean();
 
+    const enriched = await enrichAstrologersWithStats(astrologers);
+
     // Batch fetch all interviews in ONE query instead of N queries
-    const astroIds = astrologers.map(a => a._id);
+    const astroIds = enriched.map(a => a._id);
     const interviews = await AstroInterview.find({ astrologer: { $in: astroIds } }).lean();
     const interviewMap = {};
     for (const iv of interviews) {
         interviewMap[String(iv.astrologer)] = iv;
     }
 
-    return astrologers.map(astro => ({
+    return enriched.map(astro => ({
         ...astro,
         interview: interviewMap[String(astro._id)] || null
     }));
@@ -93,15 +142,17 @@ const getPendingAstrologers = async () => {
         .populate("astrologerLogin")
         .lean();
 
+    const enriched = await enrichAstrologersWithStats(astrologers);
+
     // Batch fetch all interviews in ONE query instead of N queries
-    const astroIds = astrologers.map(a => a._id);
+    const astroIds = enriched.map(a => a._id);
     const interviews = await AstroInterview.find({ astrologer: { $in: astroIds } }).lean();
     const interviewMap = {};
     for (const iv of interviews) {
         interviewMap[String(iv.astrologer)] = iv;
     }
 
-    return astrologers.map(astro => ({
+    return enriched.map(astro => ({
         ...astro,
         interview: interviewMap[String(astro._id)] || null
     }));

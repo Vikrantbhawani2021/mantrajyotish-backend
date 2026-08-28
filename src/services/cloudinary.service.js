@@ -115,20 +115,30 @@ const getDefaultProfilePic = (id, role, gender) => {
     let count;
 
     if (isAstro) {
-        if (normalizedGender === "female" && astroFemaleCount > 0) {
+        let useFemale = normalizedGender === "female";
+        if (!normalizedGender) {
+            // Deterministically distribute male/female default images based on the ID hash
+            useFemale = Math.abs(hash % 2) === 0;
+        }
+
+        if (useFemale && astroFemaleCount > 0) {
             prefix = "astro_female_pic";
             count = astroFemaleCount;
         } else {
-            // Default/Fallback to male
             prefix = "astro_male_pic";
             count = astroMaleCount > 0 ? astroMaleCount : 1;
         }
     } else {
-        if (normalizedGender === "female" && userFemaleCount > 0) {
+        let useFemale = normalizedGender === "female";
+        if (!normalizedGender) {
+            // Deterministically distribute male/female default images based on the ID hash
+            useFemale = Math.abs(hash % 2) === 0;
+        }
+
+        if (useFemale && userFemaleCount > 0) {
             prefix = "user_female_pic";
             count = userFemaleCount;
         } else {
-            // Default/Fallback to male
             prefix = "user_male_pic";
             count = userMaleCount > 0 ? userMaleCount : 1;
         }

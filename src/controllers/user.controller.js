@@ -129,12 +129,51 @@ const registerUser = async (req, res, next) => {
 // 3. GET ALL USERS (Admin / Listing)
 const getAllUsers = async (req, res, next) => {
     try {
-        const users = await User.find().sort({ createdAt: -1 });
+        const users = await User.find().sort({ createdAt: -1 }).lean();
+
+        const ChatSession = require("../models/chatSession.model");
+        const VideoSession = require("../models/videoSession.model");
+
+        const updatedUsers = await Promise.all(users.map(async (u) => {
+            try {
+                const [chatCount, callCount, chatCosts, callCosts] = await Promise.all([
+                    ChatSession.countDocuments({ user: u._id, status: "COMPLETED" }),
+                    VideoSession.countDocuments({ user: u._id, status: { $in: ["COMPLETED", "ACTIVE", "live"] } }),
+                    ChatSession.aggregate([
+                        { $match: { user: u._id, status: "COMPLETED" } },
+                        { $group: { _id: null, total: { $sum: "$totalAmountDeducted" } } }
+                    ]),
+                    VideoSession.aggregate([
+                        { $match: { user: u._id, status: "COMPLETED" } },
+                        { $group: { _id: null, total: { $sum: "$totalAmountDeducted" } } }
+                    ])
+                ]);
+
+                const chatSpend = chatCosts[0]?.total || 0;
+                const callSpend = callCosts[0]?.total || 0;
+                const totalSpent = parseFloat((chatSpend + callSpend).toFixed(2));
+
+                return {
+                    ...u,
+                    totalChats: chatCount,
+                    totalCalls: callCount,
+                    totalSpent: totalSpent
+                };
+            } catch (err) {
+                console.error("Failed to aggregate stats for user:", u._id, err.message);
+                return {
+                    ...u,
+                    totalChats: 0,
+                    totalCalls: 0,
+                    totalSpent: 0
+                };
+            }
+        }));
 
         return res.status(200).json({
             success: true,
-            count: users.length,
-            data: users
+            count: updatedUsers.length,
+            data: updatedUsers
         });
 
     } catch (error) {

@@ -141,7 +141,14 @@ UserSchema.pre("save", async function () {
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
     this.uniqueId = `UB${randomDigits}`;
   }
-  if (!this.profileImage) {
+
+  const isDefaultPic = !this.profileImage || 
+                       this.profileImage.includes("user_female_pic") || 
+                       this.profileImage.includes("user_male_pic") || 
+                       this.profileImage.includes("astro_female_pic") || 
+                       this.profileImage.includes("astro_male_pic");
+
+  if (isDefaultPic) {
     const { getDefaultProfilePic } = require("../services/cloudinary.service");
     this.profileImage = getDefaultProfilePic(this._id, this.role, this.gender);
   }
