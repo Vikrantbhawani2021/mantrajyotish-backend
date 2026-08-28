@@ -264,6 +264,24 @@ router.post("/update-balance", async (req, res) => {
 
         await user.save();
 
+        // Create transaction history log in Payment model
+        try {
+            const Payment = require("../models/payment.model");
+            const txnId = `ADJ_${Date.now()}`;
+            await Payment.create({
+                user: user._id,
+                amount: action === "deduct" ? -numericAmount : numericAmount,
+                currency: "INR",
+                paymentGateway: "Admin",
+                transactionId: txnId,
+                orderId: txnId,
+                paymentStatus: "success",
+                paidAt: new Date()
+            });
+        } catch (paymentErr) {
+            console.error("Failed to log admin wallet adjustment to Payment collection:", paymentErr.message);
+        }
+
         console.log(`💰 Admin adjusted User ${user._id} balance. Action: ${action}, Amount: ₹${numericAmount}. Previous: ₹${previousBalance}, New: ₹${user.walletBalance}`);
 
         return res.status(200).json({
@@ -629,20 +647,23 @@ router.get("/transactions", async (req, res) => {
                 }
             });
 
-            // Include Payment (top-up) records as credit transactions
+            // Include Payment (top-up / adjustments) records
             try {
                 const payments = await Payment.find({ user: user._id }).sort({ createdAt: -1 }).limit(20).lean();
                 payments.forEach(p => {
                     if (p.paymentStatus === "success") {
+                        const isDebit = p.amount < 0;
                         txns.push({
                             id: String(p._id),
                             transactionId: p.transactionId || String(p._id),
-                            title: p.appointment ? `Payment for appointment` : `Added Money`,
+                            title: p.paymentGateway === "Admin"
+                                ? (isDebit ? `Debit Adjustment by Admin` : `Reward from App`)
+                                : (p.appointment ? `Payment for appointment` : `Added Money`),
                             date: formatKolkataDate(p.paidAt || p.createdAt),
                             createdAt: p.paidAt || p.createdAt,
-                            amount: p.amount,
+                            amount: Math.abs(p.amount),
                             status: "Success",
-                            type: "credit",
+                            type: isDebit ? "debit" : "credit",
                             meta: {
                                 paymentGateway: p.paymentGateway,
                                 transactionId: p.transactionId,

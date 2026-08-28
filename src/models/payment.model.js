@@ -27,7 +27,7 @@ const PaymentSchema = new mongoose.Schema(
 
     paymentGateway: {
         type: String,
-        enum: ["Razorpay", "Stripe", "Cashfree"],
+        enum: ["Razorpay", "Stripe", "Cashfree", "Admin"],
         default: "Razorpay"
     },
 
