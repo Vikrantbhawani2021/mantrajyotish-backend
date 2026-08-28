@@ -237,6 +237,50 @@ router.post("/add", async (req, res) => {
 });
 
 /**
+ * POST /api/wallet/update-balance
+ * Admins use this to directly adjust a user's wallet balance.
+ * Body: { userId: String, amount: Number, action: 'add'|'deduct' }
+ */
+router.post("/update-balance", async (req, res) => {
+    try {
+        const { userId, amount, action } = req.body;
+        const numericAmount = parseFloat(amount);
+        if (isNaN(numericAmount) || numericAmount <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid amount. Must be a positive number." });
+        }
+
+        const User = require("../models/user.model");
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        const previousBalance = user.walletBalance || 0;
+        if (action === "deduct") {
+            user.walletBalance = Math.max(0, previousBalance - numericAmount);
+        } else {
+            user.walletBalance = previousBalance + numericAmount;
+        }
+
+        await user.save();
+
+        console.log(`💰 Admin adjusted User ${user._id} balance. Action: ${action}, Amount: ₹${numericAmount}. Previous: ₹${previousBalance}, New: ₹${user.walletBalance}`);
+
+        return res.status(200).json({
+            success: true,
+            message: `Wallet balance updated successfully.`,
+            data: {
+                previousBalance,
+                newBalance: user.walletBalance
+            }
+        });
+    } catch (error) {
+        console.error("POST /api/wallet/update-balance error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+/**
  * POST /api/wallet/withdraw
  * Astrologer requests withdrawal of funds.
  * Body: { amount: Number, payoutMethod: 'upi'|'bank', upiId?: String, accountNumber?: String, ifscCode?: String, accountHolder?: String }
