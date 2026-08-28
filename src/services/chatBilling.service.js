@@ -36,6 +36,7 @@ const startBillingTimer = (sessionId, io) => {
             console.log(`⏱️ Chat ${sessionId} starting. Rate: ₹${rate}/min. User Balance: ₹${userBalance}. Max allowed duration: ${maxSeconds}s.`);
 
             // 1. Timeout to end the chat automatically when balance runs out
+            // Cap the delay at the maximum 32-bit signed integer limit (2147483647 ms) to avoid instant triggers on large balances
             const timeoutId = setTimeout(async () => {
                 try {
                     console.log(`🚨 Auto-ending chat session ${sessionId} due to zero wallet balance.`);
@@ -54,7 +55,7 @@ const startBillingTimer = (sessionId, io) => {
                 } catch (timeoutErr) {
                     console.error("Error in chat billing timeout:", timeoutErr.message);
                 }
-            }, maxSeconds * 1000);
+            }, Math.min(2147483647, maxSeconds * 1000));
 
             // 2. Interval to broadcast timer ticks to clients (every 10 seconds)
             const intervalId = setInterval(async () => {
@@ -186,6 +187,7 @@ const resumeChatBilling = async (sessionId, io) => {
         const remainingSeconds = Math.max(1, Math.floor((userBalance - currentCost) / ratePerSec));
 
         // Restart zero-balance timeout
+        // Cap the delay at the maximum 32-bit signed integer limit (2147483647 ms) to avoid instant triggers on large balances
         timers.timeoutId = setTimeout(async () => {
             try {
                 console.log(`🚨 Auto-ending chat session ${sessionId} due to zero wallet balance.`);
@@ -201,7 +203,7 @@ const resumeChatBilling = async (sessionId, io) => {
             } catch (err) {
                 console.error("Error in chat billing timeout:", err.message);
             }
-        }, remainingSeconds * 1000);
+        }, Math.min(2147483647, remainingSeconds * 1000));
 
         // Restart interval ticks (every 10 seconds)
         timers.intervalId = setInterval(async () => {

@@ -36,6 +36,7 @@ const startCallBillingTimer = (sessionId, io) => {
             console.log(`⏱️ Call ${sessionId} starting. Rate: ₹${rate}/min. User Balance: ₹${userBalance}. Max allowed duration: ${maxSeconds}s.`);
 
             // 1. Timeout to end the call automatically when balance runs out
+            // Cap the delay at the maximum 32-bit signed integer limit (2147483647 ms) to avoid instant triggers on large balances
             const timeoutId = setTimeout(async () => {
                 try {
                     console.log(`🚨 Auto-ending call session ${sessionId} due to zero wallet balance.`);
@@ -55,7 +56,7 @@ const startCallBillingTimer = (sessionId, io) => {
                 } catch (timeoutErr) {
                     console.error("Error in call billing timeout:", timeoutErr.message);
                 }
-            }, maxSeconds * 1000);
+            }, Math.min(2147483647, maxSeconds * 1000));
 
             // 2. Interval to broadcast timer ticks to clients (every 10 seconds)
             const intervalId = setInterval(async () => {
@@ -189,6 +190,7 @@ const resumeCallBilling = async (sessionId, io) => {
         const remainingSeconds = Math.max(1, Math.floor((userBalance - currentCost) / ratePerSec));
 
         // Restart zero-balance timeout
+        // Cap the delay at the maximum 32-bit signed integer limit (2147483647 ms) to avoid instant triggers on large balances
         timers.timeoutId = setTimeout(async () => {
             try {
                 console.log(`🚨 Auto-ending call session ${sessionId} due to zero wallet balance.`);
@@ -205,7 +207,7 @@ const resumeCallBilling = async (sessionId, io) => {
             } catch (err) {
                 console.error("Error in call billing timeout:", err.message);
             }
-        }, remainingSeconds * 1000);
+        }, Math.min(2147483647, remainingSeconds * 1000));
 
         // Restart interval ticks (every 10 seconds)
         timers.intervalId = setInterval(async () => {
