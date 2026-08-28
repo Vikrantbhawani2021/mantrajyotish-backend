@@ -657,7 +657,7 @@ router.get("/transactions", async (req, res) => {
                             id: String(p._id),
                             transactionId: p.transactionId || String(p._id),
                             title: p.paymentGateway === "Admin"
-                                ? (isDebit ? `Debit Adjustment by Admin` : `Reward from App`)
+                                ? (p.transactionId && p.transactionId.startsWith("SIGNUP_") ? `Signup Reward` : (isDebit ? `Debit Adjustment by Admin` : `Reward from App`))
                                 : (p.appointment ? `Payment for appointment` : `Added Money`),
                             date: formatKolkataDate(p.paidAt || p.createdAt),
                             createdAt: p.paidAt || p.createdAt,

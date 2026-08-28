@@ -85,8 +85,27 @@ const registerUser = async (req, res, next) => {
             phone,
             email: email && email.trim() ? email.trim().toLowerCase() : undefined,
             role: role || "user",
-            isProfileCompleted: Boolean(name || (firstname && lastname))
+            isProfileCompleted: Boolean(name || (firstname && lastname)),
+            walletBalance: 100
         });
+
+        // Log signup reward to Payment history
+        try {
+            const Payment = require("../models/payment.model");
+            const txnId = `SIGNUP_${Date.now()}`;
+            await Payment.create({
+                user: user._id,
+                amount: 100,
+                currency: "INR",
+                paymentGateway: "Admin",
+                transactionId: txnId,
+                orderId: txnId,
+                paymentStatus: "success",
+                paidAt: new Date()
+            });
+        } catch (paymentErr) {
+            console.error("Failed to log signup reward to Payment collection:", paymentErr.message);
+        }
 
         const token = generateToken({
             userId: user._id,

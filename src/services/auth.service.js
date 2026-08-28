@@ -58,8 +58,27 @@ const verifyOtp = async (phone, otp) => {
         user = await User.create({
             phone,
             role: "user",
-            isProfileCompleted: false
+            isProfileCompleted: false,
+            walletBalance: 100
         });
+
+        // Log signup reward to Payment history
+        try {
+            const Payment = require("../models/payment.model");
+            const txnId = `SIGNUP_${Date.now()}`;
+            await Payment.create({
+                user: user._id,
+                amount: 100,
+                currency: "INR",
+                paymentGateway: "Admin",
+                transactionId: txnId,
+                orderId: txnId,
+                paymentStatus: "success",
+                paidAt: new Date()
+            });
+        } catch (paymentErr) {
+            console.error("Failed to log signup reward to Payment collection:", paymentErr.message);
+        }
     }
 
     // Record login entry in UserLogin model
