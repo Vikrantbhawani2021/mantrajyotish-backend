@@ -297,6 +297,11 @@ const updateProfile = async (req, res, next) => {
 const deleteUser = async (req, res, next) => {
     try {
         const { id } = req.params;
+
+        const ChatSession = require("../models/chatSession.model");
+        const VideoSession = require("../models/videoSession.model");
+        const Appointment = require("../models/appointment.model");
+
         const user = await User.findByIdAndDelete(id);
 
         if (!user) {
@@ -306,9 +311,18 @@ const deleteUser = async (req, res, next) => {
             });
         }
 
+        // Delete all related documents for this user (except Payments, which we keep for financial audits)
+        await Promise.all([
+            ChatSession.deleteMany({ user: id }),
+            VideoSession.deleteMany({ user: id }),
+            Appointment.deleteMany({ user: id })
+        ]);
+
+        console.log(`🗑️ Permanently deleted User ${id} (${user.name || user.phone}) and all their associated chats, calls, and appointments.`);
+
         return res.status(200).json({
             success: true,
-            message: "User deleted successfully"
+            message: "User and all associated chat/call session logs deleted successfully"
         });
 
     } catch (error) {
