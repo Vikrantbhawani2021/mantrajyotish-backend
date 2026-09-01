@@ -112,6 +112,38 @@
                 addSystemMsg("Connected to room: session_" + sessionId);
             });
 
+        let ringtoneAudio = null;
+        let ringtoneTimeout = null;
+
+        function playRingtoneSound() {
+            stopRingtoneSound();
+            ringtoneAudio = new Audio("/public/sounds/ringtone.mp3");
+            ringtoneAudio.loop = true;
+            ringtoneAudio.play().catch(err => console.warn("Ringtone playback notice:", err));
+            ringtoneTimeout = setTimeout(() => {
+                stopRingtoneSound();
+            }, 30000);
+        }
+
+        function stopRingtoneSound() {
+            if (ringtoneAudio) {
+                ringtoneAudio.pause();
+                ringtoneAudio.currentTime = 0;
+                ringtoneAudio = null;
+            }
+            if (ringtoneTimeout) {
+                clearTimeout(ringtoneTimeout);
+                ringtoneTimeout = null;
+            }
+        }
+
+            // Incoming Chat Request Listener with 30s Ringtone
+            socket.on("incoming_chat_request", (data) => {
+                console.log("🔔 Incoming Chat Request:", data);
+                addSystemMsg(`🔔 Incoming Chat Request from ${data.user?.name || "Client"}! Session: ${data.sessionId}`);
+                playRingtoneSound();
+            });
+
             // Receive Live Messages
             socket.on("receive_message", (data) => {
                 console.log("New message:", data);
@@ -132,6 +164,7 @@
 
             // Chat Accepted
             socket.on("chat_accepted", (data) => {
+                stopRingtoneSound();
                 document.getElementById("sessionStatus").innerText = "ACTIVE";
                 document.getElementById("sessionStatus").className = "status-badge badge-active";
                 addSystemMsg("🟢 Astrologer accepted the chat. Live billing started!");
@@ -139,6 +172,7 @@
 
             // Chat Ended
             socket.on("chat_ended", (data) => {
+                stopRingtoneSound();
                 document.getElementById("sessionStatus").innerText = "COMPLETED";
                 document.getElementById("sessionStatus").className = "status-badge badge-ended";
                 addSystemMsg(`🔴 Session Ended: ${data.message || data.reason}`);

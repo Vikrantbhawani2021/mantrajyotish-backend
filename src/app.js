@@ -1,3 +1,4 @@
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const routes = require("./routes");
@@ -7,6 +8,9 @@ const errorMiddleware = require("./middlewares/error.middleware");
 const connectDB = require("./config/db");
 
 const app = express();
+
+// Serve static public assets (sounds, ringtones)
+app.use("/public", express.static(path.join(__dirname, "../public")));
 
 // Middlewares
 app.use(cors());

@@ -173,7 +173,11 @@ exports.initiateChat = async (req, res, next) => {
                     session: responseData,
                     sessionId: session._id,
                     _id: session._id,
-                    user: userDetails
+                    user: userDetails,
+                    sound: "ringtone.mp3",
+                    ringtoneUrl: "/public/sounds/ringtone.mp3",
+                    ringtoneDuration: 30,
+                    playRingtone: true
                 };
                 
                 // Broadcast to Astrologer document ID, User ID, and AstrologerLogin ID rooms

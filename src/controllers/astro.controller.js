@@ -12,7 +12,15 @@ const normalizeAstroData = async (req) => {
     // If request has JWT user from authMiddleware
     if (req.user) {
         if (req.user.role === "astrologer") {
-            astrologerLoginId = astrologerLoginId || req.user.userId;
+            const astroId = req.params.id || req.user.userId;
+            if (astroId) {
+                try {
+                    const astroDoc = await Astrologer.findById(astroId);
+                    if (astroDoc && astroDoc.astrologerLogin) {
+                        astrologerLoginId = astroDoc.astrologerLogin.toString();
+                    }
+                } catch (err) {}
+            }
         } else {
             userId = userId || req.user.userId;
         }
@@ -35,7 +43,9 @@ const normalizeAstroData = async (req) => {
 
     const payload = {};
 
-    if (astrologerLoginId) payload.astrologerLogin = astrologerLoginId;
+    if (astrologerLoginId && astrologerLoginId !== req.params?.id && astrologerLoginId !== req.user?.userId) {
+        payload.astrologerLogin = astrologerLoginId;
+    }
     if (userId) payload.user = userId;
     if (name) payload.name = name;
     if (email) payload.email = email.toLowerCase();
@@ -46,7 +56,7 @@ const normalizeAstroData = async (req) => {
         payload.password = await bcrypt.hash(password.trim(), 10);
     }
 
-    const rawProfileImage = body.profilePhoto || body.profileImage;
+    const rawProfileImage = body.profilePhoto || body.profileImage || body.avatar || body.image || body.photo || body.profilePic;
     if (rawProfileImage) {
         try {
             payload.profileImage = await cloudinaryService.uploadBase64OrUrl(rawProfileImage, "astro_profiles");
@@ -54,6 +64,14 @@ const normalizeAstroData = async (req) => {
             payload.profileImage = rawProfileImage;
         }
     }
+
+    if (body.location !== undefined && body.location !== null) payload.location = body.location;
+    if (body.city !== undefined && body.city !== null) payload.city = body.city;
+    if (body.state !== undefined && body.state !== null) payload.state = body.state;
+    if (body.address !== undefined && body.address !== null) payload.address = body.address;
+    if (body.district !== undefined && body.district !== null) payload.district = body.district;
+    if (body.age !== undefined && body.age !== null) payload.age = String(body.age);
+    if (body.gender !== undefined && body.gender !== null) payload.gender = String(body.gender).toLowerCase();
 
     const rawCertificate = body.certificateFile;
     if (rawCertificate) {

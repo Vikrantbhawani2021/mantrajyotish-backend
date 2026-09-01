@@ -264,6 +264,25 @@ const updateAstrologer = async (id, data) => {
             const { getDefaultProfilePic } = require("./cloudinary.service");
             data.profileImage = getDefaultProfilePic(id, "astrologer", data.gender);
         }
+
+        // Sync updates to corresponding AstrologerLogin document
+        let astrologerLoginId = existing.astrologerLogin;
+        if (!astrologerLoginId && existing.email) {
+            const loginDoc = await AstrologerLogin.findOne({ email: existing.email.toLowerCase() });
+            if (loginDoc) astrologerLoginId = loginDoc._id;
+        }
+
+        if (astrologerLoginId) {
+            const loginUpdate = {};
+            if (data.name !== undefined) loginUpdate.name = data.name;
+            if (data.email !== undefined) loginUpdate.email = data.email.toLowerCase();
+            if (data.phone !== undefined) loginUpdate.phone = data.phone;
+            if (data.password !== undefined) loginUpdate.password = data.password;
+
+            if (Object.keys(loginUpdate).length > 0) {
+                await AstrologerLogin.findByIdAndUpdate(astrologerLoginId, loginUpdate);
+            }
+        }
     }
 
     const updated = await Astrologer.findByIdAndUpdate(

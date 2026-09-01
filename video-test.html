@@ -85,15 +85,42 @@
                 socket.emit("register_user", { userId });
             });
 
+        let ringtoneAudio = null;
+        let ringtoneTimeout = null;
+
+        function playRingtoneSound() {
+            stopRingtoneSound();
+            ringtoneAudio = new Audio("/public/sounds/ringtone.mp3");
+            ringtoneAudio.loop = true;
+            ringtoneAudio.play().catch(err => console.warn("Ringtone playback notice:", err));
+            ringtoneTimeout = setTimeout(() => {
+                stopRingtoneSound();
+            }, 30000);
+        }
+
+        function stopRingtoneSound() {
+            if (ringtoneAudio) {
+                ringtoneAudio.pause();
+                ringtoneAudio.currentTime = 0;
+                ringtoneAudio = null;
+            }
+            if (ringtoneTimeout) {
+                clearTimeout(ringtoneTimeout);
+                ringtoneTimeout = null;
+            }
+        }
+
             socket.on("incoming_call_request", (data) => {
                 activeSessionId = data.sessionId;
                 currentCallType = data.callType;
                 document.getElementById("statusText").innerText = `🔔 Incoming ${data.callType} Call Request! Session: ${data.sessionId}`;
                 document.getElementById("btnAccept").style.display = "inline-block";
                 document.getElementById("btnReject").style.display = "inline-block";
+                playRingtoneSound();
             });
 
             socket.on("call_accepted", async (data) => {
+                stopRingtoneSound();
                 document.getElementById("statusText").innerText = "🎉 Call Accepted! Connecting to Agora...";
                 document.getElementById("btnAccept").style.display = "none";
                 document.getElementById("btnReject").style.display = "none";
@@ -101,11 +128,13 @@
             });
 
             socket.on("call_rejected", (data) => {
+                stopRingtoneSound();
                 document.getElementById("statusText").innerText = "❌ Call Rejected: " + (data.reason || "Astrologer unavailable");
                 leaveCall();
             });
 
             socket.on("call_ended", (data) => {
+                stopRingtoneSound();
                 document.getElementById("statusText").innerText = "🔴 Call Ended: " + (data.message || "Session closed");
                 leaveCall();
             });

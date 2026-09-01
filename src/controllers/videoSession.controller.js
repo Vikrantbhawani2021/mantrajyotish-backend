@@ -98,7 +98,11 @@ const requestCall = async (req, res) => {
                 user: flatUser,
                 astrologer: session.astrologer,
                 perMinuteRate: session.perMinuteRate,
-                channelName: session.channelName
+                channelName: session.channelName,
+                sound: "ringtone.mp3",
+                ringtoneUrl: "/public/sounds/ringtone.mp3",
+                ringtoneDuration: 30,
+                playRingtone: true
             };
 
             const targetRooms = new Set();

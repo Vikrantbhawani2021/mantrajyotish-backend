@@ -40,8 +40,29 @@ exports.createAstrologerLogin = async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Extract optional profile fields if provided during signup
-        const profileImage = body.profilePhoto || body.profileImage || null;
+        const cloudinaryService = require("../services/cloudinary.service");
+
+        // Extract and process profile photo & certificate if provided during signup
+        const rawProfileImage = body.profilePhoto || body.profileImage || body.avatar || body.image || body.photo || body.profilePic || null;
+        let profileImage = null;
+        if (rawProfileImage) {
+            try {
+                profileImage = await cloudinaryService.uploadBase64OrUrl(rawProfileImage, "astro_profiles");
+            } catch (e) {
+                profileImage = rawProfileImage;
+            }
+        }
+
+        const rawCertificate = body.certificateFile || body.certificate || null;
+        let certificateFile = null;
+        if (rawCertificate) {
+            try {
+                certificateFile = await cloudinaryService.uploadBase64OrUrl(rawCertificate, "astro_certificates");
+            } catch (e) {
+                certificateFile = rawCertificate;
+            }
+        }
+
         const introduction = body.introduction || body.about || null;
         const about = body.introduction || body.about || null;
         const experience = body.experience ? String(body.experience) : "0";
@@ -50,10 +71,16 @@ exports.createAstrologerLogin = async (req, res) => {
         const languages = body.languages || [];
         const approach = body.approach || null;
         const motivation = body.motivation || null;
-        const toolsTechniques = body.toolsTechniques || null;
-        const certificateFile = body.certificateFile || null;
+        const toolsTechniques = body.toolsTechniques || body.tools || null;
         const certificateName = body.certificateName || null;
         const achievements = body.achievements || null;
+        const location = body.location || null;
+        const city = body.city || null;
+        const state = body.state || null;
+        const address = body.address || null;
+        const district = body.district || null;
+        const age = body.age ? String(body.age) : null;
+        const gender = body.gender ? String(body.gender).toLowerCase() : null;
 
         // Save Astrologer record
         const astrologer = await Astrologer.create({
@@ -75,6 +102,13 @@ exports.createAstrologerLogin = async (req, res) => {
             certificateFile,
             certificateName,
             achievements,
+            location,
+            city,
+            state,
+            address,
+            district,
+            age,
+            gender,
             isAvailable: true
         });
 

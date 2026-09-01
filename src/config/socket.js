@@ -410,7 +410,11 @@ const initSocket = (server) => {
                     session: responseData,
                     sessionId: session._id,
                     _id: session._id,
-                    user: userDetails
+                    user: userDetails,
+                    sound: "ringtone.mp3",
+                    ringtoneUrl: "/public/sounds/ringtone.mp3",
+                    ringtoneDuration: 30,
+                    playRingtone: true
                 };
 
                 io.to(`user_${astroObj._id}`).emit("incoming_chat_request", payload);
@@ -764,7 +768,11 @@ const initSocket = (server) => {
                     user: flatUser,
                     astrologer: session.astrologer,
                     perMinuteRate: session.perMinuteRate,
-                    channelName: session.channelName
+                    channelName: session.channelName,
+                    sound: "ringtone.mp3",
+                    ringtoneUrl: "/public/sounds/ringtone.mp3",
+                    ringtoneDuration: 30,
+                    playRingtone: true
                 };
 
                 const astroObj = await findAstrologerByIdOrRef(astrologerId);
